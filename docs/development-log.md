@@ -45,7 +45,6 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 - Implement actual AudioUnit for real-time audio I/O
 - Complete FFT implementation with proper vDSP usage
-- Make pipeline decision: focus on voice conversion or TTS first
 - Begin investigating FastSpeech 2 and HiFi-GAN model conversion
 
 ### Open Questions
@@ -53,6 +52,45 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 - What buffer size will give the best latency/stability tradeoff? (Initial target: 256 samples)
 - Will we need a custom ring buffer implementation for thread communication?
 - Can we achieve <100ms latency with full neural processing pipeline?
+
+---
+
+## 2024-03-06: Pipeline Decision - Focus on Voice Conversion
+
+### Decision Summary
+
+- **Chosen approach**: Live voice conversion for Discord calls
+- **Target use case**: Transform user's voice to character voices (e.g., Uncle Iroh) in real-time
+- **Not pursuing**: Text-to-speech approach (may revisit later)
+
+### Technical Implications
+
+#### Pipeline Architecture
+
+- Input: Live microphone audio from user
+- Processing: Convert voice characteristics while preserving speech content
+- Output: Transformed audio to Discord or other communication apps
+- Target latency: <100ms end-to-end to maintain conversation flow
+
+#### Components Affected
+
+- **AudioProcessor**: Must capture system audio or microphone and route output to virtual device
+- **DSP**: Focus on efficient feature extraction optimized for voice characteristics
+- **ML Models**: Need speaker encoding and voice conversion models rather than TTS
+- **Output Handling**: May need virtual audio device or audio routing system for Discord integration
+
+### Next Steps (Revised)
+
+1. Implement AudioUnit for real-time input/output with focus on capturing microphone
+2. Research voice conversion models that balance quality and speed
+3. Investigate audio routing options to feed processed audio to Discord
+4. Begin work on feature extraction (mel-spectrograms) optimized for voice characteristics
+
+### Open Questions
+
+- Which voice conversion model architecture will best balance quality and speed?
+- How will we handle audio device routing to feed into Discord?
+- Will we need custom virtual audio device drivers?
 
 ---
 

@@ -2,12 +2,12 @@
 
 ## 🚀 **Step 1: Define the Core Pipeline**
 
-Clearly define which scenario you’re targeting first:
+We have decided to focus on:
 
-- **Live voice conversion**: Transform a user’s live voice in real-time (e.g., during Discord calls).
-- **Text-to-speech (TTS)**: Input text and generate cloned character speech in real-time.
+- **Live voice conversion**: Transform a user's live voice in real-time during Discord calls
+- Target use case: Voice imitation of character voices (e.g., Uncle Iroh from Avatar)
 
-_For Discord voice calls (e.g., voice imitation of Uncle Iroh), you'd typically focus initially on live **voice conversion** (microphone input → cloned voice output)._
+_This approach focuses on converting the user's voice characteristics while preserving the speech content, rather than generating speech from text._
 
 ---
 
@@ -36,7 +36,7 @@ _For Discord voice calls (e.g., voice imitation of Uncle Iroh), you'd typically 
 
 ## 📐 **Step 3: Implement Audio Feature Extraction**
 
-**Goal:** Compute efficient audio features required by your voice cloning model (e.g., Mel Spectrograms) from raw audio buffers.
+**Goal:** Compute efficient audio features required by your voice conversion model (e.g., Mel Spectrograms) from raw audio buffers.
 
 ### Tasks:
 
@@ -53,42 +53,43 @@ _For Discord voice calls (e.g., voice imitation of Uncle Iroh), you'd typically 
 
 ## 🤖 **Step 4: Select and Prototype Your ML Model**
 
-Choose a voice cloning pipeline:
+Choose a voice conversion pipeline:
 
-- **Option A (Proven, moderate complexity):**
+- **Option A (Voice Conversion with encoder-decoder):**
 
-  - Speaker Encoder (e.g., GE2E from SV2TTS)
-  - FastSpeech 2 (text → spectrogram or audio features)
-  - HiFi-GAN vocoder (spectrogram → waveform)
+  - Speaker Encoder to extract voice characteristics
+  - Voice Conversion model (e.g., AutoVC, FragmentVC)
+  - Vocoder (e.g., HiFi-GAN) to generate output waveform
 
-- **Option B (simpler, ultra-fast):**
-  - RAVE or LPCNet for waveform synthesis (fewer parameters, higher speed but moderate quality).
+- **Option B (Direct waveform modeling):**
+  - RAVE or similar models for direct waveform transformation
+  - Fewer parameters, higher speed but potentially moderate quality
 
 ### Practical Recommendation:
 
-- Begin with **FastSpeech 2 + HiFi-GAN** to balance high quality and fast inference.
-- Optionally integrate a GE2E-like **speaker encoder** for zero-shot voice adaptation.
+- Begin with an **encoder-decoder + vocoder** approach for better voice quality
+- Use pre-trained models as much as possible, focusing on porting to Core ML
 
 ---
 
-## 🛠 **Step 4b: Port & Optimize Models for Core ML**
+## 🛠 **Step 5: Port & Optimize Models for Core ML**
 
 **Goal:** Convert chosen models to native Core ML format for GPU/ANE execution.
 
 ### Tasks:
 
-- Train or obtain pre-trained FastSpeech 2 and HiFi-GAN models (PyTorch).
-- Convert models using **`coremltools`**.
-- Quantize models to 16-bit precision for Neural Engine efficiency.
+- Convert voice conversion models from PyTorch/TensorFlow to Core ML using `coremltools`
+- Quantize models to 16-bit precision for Neural Engine efficiency
+- Optimize model architecture for lowest possible latency
 
 **Tools:**
 
-- `coremltools` (Apple’s official Core ML model converter)
-- PyTorch or TensorFlow for model training or obtaining checkpoints from open projects (Coqui, RTVC, etc.)
+- `coremltools` (Apple's official Core ML model converter)
+- PyTorch or TensorFlow for model training or obtaining checkpoints
 
 ---
 
-## 🎯 **Step 4: Implement Model Inference Pipeline**
+## 🎯 **Step 6: Implement Model Inference Pipeline**
 
 ### Goal:
 
@@ -96,14 +97,15 @@ Integrate your converted Core ML models into a Swift pipeline.
 
 ### Tasks:
 
-- Load Core ML models (`.mlmodel`) in Swift.
-- Integrate inference into your audio callback pipeline (or a dedicated background thread, communicating via ring buffer).
+- Load Core ML models (`.mlmodel`) in Swift
+- Integrate inference into your audio callback pipeline (or a dedicated background thread, communicating via ring buffer)
+- Implement a processing chain: audio input → feature extraction → voice conversion → audio output
 
 **Tips for Real-time:**
 
-- Perform neural inference asynchronously on GPU/Neural Engine.
-- Pre-allocate buffers, ensure zero heap allocations during real-time execution.
-- Measure inference latency (target < 30 ms per buffer).
+- Perform neural inference asynchronously on GPU/Neural Engine
+- Pre-allocate buffers, ensure zero heap allocations during real-time execution
+- Measure inference latency (target < 30 ms per buffer)
 
 **Tools:**
 
@@ -111,50 +113,59 @@ Integrate your converted Core ML models into a Swift pipeline.
 
 ---
 
-## 🛠 **Step 4a: Filling Gaps – Custom Layers**
+## 🎛️ **Step 7: Audio Routing for Discord**
 
-If Core ML doesn't directly support certain operations (e.g., custom upsampling in HiFi-GAN):
+### Goal:
 
-- Implement missing layers as **custom Core ML layers** using Metal shaders (`MetalPerformanceShaders`).
-- Directly use `MPSGraph` if greater GPU flexibility is required.
+Enable capturing processed audio into Discord calls.
 
-This is your primary custom development area—anticipate writing Metal shaders and custom Swift layers.
+### Tasks:
+
+- Research options for creating virtual audio devices or routing audio
+- Implement audio routing for Discord integration
+- Test end-to-end pipeline with actual Discord calls
+
+**Potential approaches:**
+
+- BlackHole or similar virtual audio device
+- Custom audio routing using Audio HAL
+- Integration with existing audio management tools
 
 ---
 
-## 🎛️ **Step 4: Performance Tuning & Optimization**
+## 🎛️ **Step 8: Performance Tuning & Optimization**
 
 ### Benchmark & Profile:
 
-- Measure end-to-end latency (microphone input → neural inference → audio output).
-- Profile using Apple’s **Instruments app** (CPU/GPU/ANE usage).
-- Tune buffer sizes, model complexity, and precision to meet your latency target (~under 100 ms round-trip latency).
+- Measure end-to-end latency (microphone input → neural inference → audio output → Discord)
+- Profile using Apple's **Instruments app** (CPU/GPU/ANE usage)
+- Tune buffer sizes, model complexity, and precision to meet your latency target (~under 100 ms round-trip latency)
 
 **Key metrics:**
 
-- **Real-time factor (RTF)**: aim below 0.2 for comfort.
-- CPU/GPU usage: ensure neural inference fits comfortably within GPU/ANE performance envelope.
+- **Real-time factor (RTF)**: aim below 0.2 for comfort
+- CPU/GPU usage: ensure neural inference fits comfortably within GPU/ANE performance envelope
 
 ---
 
-## 📊 **Step 5: Voice Adaptation (Speaker Embedding)**
+## 📊 **Step 9: Voice Adaptation (Adding More Voices)**
 
-To achieve zero-shot cloning (like Uncle Iroh’s voice):
+To expand the system's capabilities:
 
-- Integrate a speaker encoder (GE2E or similar model).
-- Convert speaker embedding network to Core ML (simpler, small model).
-- Generate embeddings quickly (sub-50 ms) and pass them to the FastSpeech model as conditional inputs.
+- Implement a voice database with multiple character voices
+- Create a UI for selecting different target voices
+- Add the ability to record and add new target voices
 
 ---
 
-## 📌 **Step 6: Benchmark, Profile, and Iterate**
+## 📌 **Step 10: Benchmark, Profile, and Iterate**
 
 ### Use Profiling Tools:
 
 - **Xcode Instruments**:
-  - “Core ML Instrument” (to verify GPU/ANE usage)
-  - “Time Profiler” (to measure bottlenecks in C/Swift code)
-  - “Metal System Trace” (GPU profiling)
+  - "Core ML Instrument" (to verify GPU/ANE usage)
+  - "Time Profiler" (to measure bottlenecks in C/Swift code)
+  - "Metal System Trace" (GPU profiling)
 
 Iteratively optimize model layers, memory management, and audio buffering based on profiling results.
 
@@ -164,9 +175,10 @@ Iteratively optimize model layers, memory management, and audio buffering based 
 
 ### Existing Projects:
 
-- **[Real-Time Voice Cloning (SV2TTS)](https://github.com/CorentinJ/Real-Time-Voice-Cloning)**: Study pipeline and model integration.
-- **[Coqui TTS](https://github.com/coqui-ai/TTS)**: Rich collection of trained models (FastSpeech, Tacotron, HiFi-GAN).
-- **[Mycroft Mimic 3](https://github.com/MycroftAI/mimic3)**: Excellent reference for minimal-latency implementations.
+- **[AutoVC](https://github.com/auspicious3000/autovc)**: Zero-shot voice conversion
+- **[FragmentVC](https://github.com/hhguo/FragmentVC)**: Low-latency voice conversion
+- **[RAVE](https://github.com/acids-ircam/RAVE)**: Fast neural audio synthesis
+- **[CoreML-Models](https://github.com/john-rocky/CoreML-Models)**: Examples of converted ML models
 
 ### Relevant Documentation:
 
@@ -186,26 +198,18 @@ Iteratively optimize model layers, memory management, and audio buffering based 
 
 ## 📖 **Recommended Papers for Deep Understanding**:
 
-- [Tacotron 2](https://arxiv.org/abs/1712.05884) (Google)
-- [FastSpeech 2](https://arxiv.org/abs/2006.04558)
-- [VITS](https://arxiv.org/abs/2106.06103)
-- [RAVE (Realtime Audio Variational autoEncoder)](https://arxiv.org/abs/2111.05011) for ultra-fast vocoding.
-
----
-
-## 🤝 **Collaboration Opportunities**:
-
-- Engage with Apple engineers via **Apple Developer Forums** and WWDC labs.
-- Collaborate or discuss ideas with communities like **Coqui TTS** and **Mycroft Mimic 3** for insights on native model porting.
+- [AutoVC: Zero-Shot Voice Style Transfer with Only Autoencoder Loss](https://arxiv.org/abs/1905.05879)
+- [FragmentVC: Any-to-Any Voice Conversion by Fragment-wise Acoustic and Phonetic Information](https://arxiv.org/abs/2010.14150)
+- [RAVE (Realtime Audio Variational autoEncoder)](https://arxiv.org/abs/2111.05011) for ultra-fast conversion
 
 ---
 
 ## 🗓 **Your Immediate Next Actions**:
 
-- **Begin setting up AudioUnit** input/output in Swift.
-- Choose a **FastSpeech2 + HiFi-GAN** model combo, convert it to Core ML, and start testing inference performance.
-- Prototype a minimal end-to-end pipeline within the next few weeks, then iterate and optimize.
+- **Begin setting up AudioUnit** input/output in Swift
+- Research and select voice conversion models appropriate for real-time use
+- Prototype a minimal end-to-end pipeline within the next few weeks, then iterate and optimize
 
 ---
 
-By following this roadmap, you'll be able to leverage your M3 Max’s native hardware fully, building a real-time, high-quality voice cloning system completely in C or Swift, optimized for minimal latency and maximum performance.
+By following this roadmap, you'll be able to leverage your M3 Max's native hardware fully, building a real-time, high-quality voice conversion system completely in C or Swift, optimized for minimal latency and maximum performance.
