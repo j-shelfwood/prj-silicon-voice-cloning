@@ -1,22 +1,28 @@
-// AudioProcessor.swift
-// Core Audio handling for real-time audio input/output
-
 import Foundation
 import AudioToolbox
 
-/// A class for handling real-time audio input and output using Core Audio's AudioUnit framework
+/**
+ Main class for handling real-time audio input and output using Core Audio's AudioUnit framework.
+ This class provides the infrastructure for capturing audio from the microphone,
+ processing it, and playing it back through the system audio output.
+ */
 public class AudioProcessor {
-    // MARK: - Types and Constants
 
-    /// Audio format settings
+    /**
+     Audio format settings for consistent use throughout the audio pipeline
+     */
     struct AudioFormatSettings {
         static let sampleRate: Double = 44100.0
-        static let channelCount: UInt32 = 1 // Mono
-        static let bytesPerSample: UInt32 = 4 // Float32
+        static let channelCount: UInt32 = 1
+        static let bytesPerSample: UInt32 = 4
         static let bitsPerChannel: UInt32 = 32
-        static let framesPerBuffer: UInt32 = 512 // ~11.6ms at 44.1kHz
+        static let framesPerBuffer: UInt32 = 512
 
-        // Create a new ASBD instance each time it's needed rather than storing as static
+        /**
+         Creates a new AudioStreamBasicDescription with our standard format settings
+
+         - Returns: Properly configured AudioStreamBasicDescription for Float32 mono PCM
+         */
         static func createASBD() -> AudioStreamBasicDescription {
             var asbd = AudioStreamBasicDescription()
             asbd.mSampleRate = sampleRate
@@ -31,30 +37,26 @@ public class AudioProcessor {
         }
     }
 
-    // MARK: - Properties
-
-    /// Flag indicating if audio processing is active
     private var isRunning = false
+    private var inputAudioUnit: AudioUnit?
+    private var outputAudioUnit: AudioUnit?
+    private var capturedAudioBuffer: [Float] = []
+    private let bufferLock = NSLock()
 
-    /// Input and output AudioUnit components
-    var inputAudioUnit: AudioUnit?
-    var outputAudioUnit: AudioUnit?
+    /**
+     Callback function for audio processing
 
-    /// Buffer to hold captured audio data
-    var capturedAudioBuffer: [Float] = []
-
-    /// Lock for thread safety when accessing the captured audio buffer
-    let bufferLock = NSLock()
-
-    /// Callback for audio processing - will be called when audio is processed
+     - Parameter [Float]: Input audio buffer
+     - Returns: Processed audio buffer to be played back
+     */
     public var audioProcessingCallback: (([Float]) -> [Float])?
 
-    /// Latency measurement
-    var captureTimestamps: [Double] = []
-    var playbackTimestamps: [Double] = []
+    private var captureTimestamps: [Double] = []
+    private var playbackTimestamps: [Double] = []
 
-    // MARK: - Initialization
-
+    /**
+     Initializes a new AudioProcessor instance
+     */
     public init() {
         print("AudioProcessor initialized")
     }
@@ -63,30 +65,27 @@ public class AudioProcessor {
         stopCapture()
     }
 
-    // MARK: - Public Methods
+    /**
+     Starts capturing audio from the default input device and setting up audio output
 
-    /// Start capturing audio from the default input device and setting up audio output
+     - Returns: Boolean indicating success or failure
+     */
     public func startCapture() -> Bool {
         guard !isRunning else {
             print("Audio capture already running")
             return true
         }
 
-        // Set up input audio unit (microphone)
-        let setupInputResult = setupInputAudioUnit()
-        guard setupInputResult else {
+        guard setupInputAudioUnit() else {
             print("Failed to set up input audio unit")
             return false
         }
 
-        // Set up output audio unit (speakers)
-        let setupOutputResult = setupOutputAudioUnit()
-        guard setupOutputResult else {
+        guard setupOutputAudioUnit() else {
             print("Failed to set up output audio unit")
             return false
         }
 
-        // Start audio processing
         var status = AudioUnitInitialize(inputAudioUnit!)
         guard status == noErr else {
             print("Failed to initialize input audio unit: \(status)")
@@ -116,7 +115,9 @@ public class AudioProcessor {
         return true
     }
 
-    /// Stop capturing audio
+    /**
+     Stops capturing audio and releases audio resources
+     */
     public func stopCapture() {
         guard isRunning else { return }
 
@@ -138,28 +139,29 @@ public class AudioProcessor {
         print("Audio capture stopped")
     }
 
-    /// Play audio through the default output device
-    /// This is a simplified method for testing - real-time playback happens through the
-    /// render callback of the output audio unit
+    /**
+     Plays audio through the default output device
+     This is a simplified method for testing - real-time playback happens through the
+     render callback of the output audio unit
+
+     - Parameter buffer: Audio samples to play
+     - Returns: Boolean indicating success or failure
+     */
     public func playAudio(_ buffer: [Float]) -> Bool {
-        if isRunning {
+        guard !isRunning else {
             print("Audio system is already running in real-time mode. Use the processing callback instead.")
             return false
         }
 
-        // Initialize output audio unit for one-time playback if not in streaming mode
-        let setupResult = setupOutputAudioUnit()
-        guard setupResult else {
+        guard setupOutputAudioUnit() else {
             print("Failed to set up output audio unit for playback")
             return false
         }
 
-        // Store the buffer for playback
         bufferLock.lock()
         capturedAudioBuffer = buffer
         bufferLock.unlock()
 
-        // Initialize and start the output audio unit
         var status = AudioUnitInitialize(outputAudioUnit!)
         guard status == noErr else {
             print("Failed to initialize output audio unit: \(status)")
@@ -172,11 +174,9 @@ public class AudioProcessor {
             return false
         }
 
-        // Wait for playback to complete (this is a simplified approach)
         let playbackDuration = Double(buffer.count) / AudioFormatSettings.sampleRate
         Thread.sleep(forTimeInterval: playbackDuration)
 
-        // Clean up
         AudioOutputUnitStop(outputAudioUnit!)
         AudioUnitUninitialize(outputAudioUnit!)
         AudioComponentInstanceDispose(outputAudioUnit!)
@@ -186,30 +186,31 @@ public class AudioProcessor {
         return true
     }
 
-    /// Get the measured latency of the audio processing pipeline
+    /**
+     Returns the measured latency of the audio processing pipeline in milliseconds
+     */
     public var measuredLatency: Double {
-        // Calculate average latency from timestamps if available
         guard !captureTimestamps.isEmpty && !playbackTimestamps.isEmpty else {
             return 0.0
         }
 
-        // Make sure we have the same number of timestamps
         let count = min(captureTimestamps.count, playbackTimestamps.count)
         guard count > 0 else { return 0.0 }
 
-        // Calculate average latency
         var totalLatency = 0.0
         for i in 0..<count {
             totalLatency += playbackTimestamps[i] - captureTimestamps[i]
         }
 
-        return (totalLatency / Double(count)) * 1000.0 // Convert to milliseconds
+        return (totalLatency / Double(count)) * 1000.0
     }
 
-    // MARK: - Private Methods
+    /**
+     Sets up the AudioUnit for capturing input from the microphone
 
+     - Returns: Boolean indicating success or failure
+     */
     private func setupInputAudioUnit() -> Bool {
-        // Find the default input audio component
         var inputComponentDescription = AudioComponentDescription()
         inputComponentDescription.componentType = kAudioUnitType_Output
         inputComponentDescription.componentSubType = kAudioUnitSubType_HALOutput
@@ -222,19 +223,17 @@ public class AudioProcessor {
             return false
         }
 
-        // Create the input audio unit
         var status = AudioComponentInstanceNew(inputComponent, &inputAudioUnit)
         guard status == noErr, inputAudioUnit != nil else {
             print("Failed to create input audio unit: \(status)")
             return false
         }
 
-        // Enable input
         var enableInput: UInt32 = 1
         status = AudioUnitSetProperty(inputAudioUnit!,
                                     kAudioOutputUnitProperty_EnableIO,
                                     kAudioUnitScope_Input,
-                                    1, // Input element
+                                    1,
                                     &enableInput,
                                     UInt32(MemoryLayout<UInt32>.size))
         guard status == noErr else {
@@ -242,12 +241,11 @@ public class AudioProcessor {
             return false
         }
 
-        // Disable output (we'll use a separate unit for output)
         var disableOutput: UInt32 = 0
         status = AudioUnitSetProperty(inputAudioUnit!,
                                     kAudioOutputUnitProperty_EnableIO,
                                     kAudioUnitScope_Output,
-                                    0, // Output element
+                                    0,
                                     &disableOutput,
                                     UInt32(MemoryLayout<UInt32>.size))
         guard status == noErr else {
@@ -255,7 +253,6 @@ public class AudioProcessor {
             return false
         }
 
-        // Set the input device to the default input device
         var defaultInputDevice = AudioDeviceID()
         var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
         var propertyAddress = AudioObjectPropertyAddress(
@@ -286,12 +283,11 @@ public class AudioProcessor {
             return false
         }
 
-        // Set the input format
         var asbd = AudioFormatSettings.createASBD()
         status = AudioUnitSetProperty(inputAudioUnit!,
                                     kAudioUnitProperty_StreamFormat,
                                     kAudioUnitScope_Output,
-                                    1, // Input element
+                                    1,
                                     &asbd,
                                     UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         guard status == noErr else {
@@ -299,7 +295,6 @@ public class AudioProcessor {
             return false
         }
 
-        // Set the input callback
         var inputCallbackStruct = AURenderCallbackStruct(
             inputProc: inputRenderCallback,
             inputProcRefCon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -316,7 +311,6 @@ public class AudioProcessor {
             return false
         }
 
-        // Set buffer size for lower latency
         var maxFramesPerSlice: UInt32 = AudioFormatSettings.framesPerBuffer
         status = AudioUnitSetProperty(inputAudioUnit!,
                                     kAudioUnitProperty_MaximumFramesPerSlice,
@@ -332,8 +326,12 @@ public class AudioProcessor {
         return true
     }
 
+    /**
+     Sets up the AudioUnit for playing audio to the speakers
+
+     - Returns: Boolean indicating success or failure
+     */
     private func setupOutputAudioUnit() -> Bool {
-        // Find the default output audio component
         var outputComponentDescription = AudioComponentDescription()
         outputComponentDescription.componentType = kAudioUnitType_Output
         outputComponentDescription.componentSubType = kAudioUnitSubType_DefaultOutput
@@ -346,19 +344,17 @@ public class AudioProcessor {
             return false
         }
 
-        // Create the output audio unit
         var status = AudioComponentInstanceNew(outputComponent, &outputAudioUnit)
         guard status == noErr, outputAudioUnit != nil else {
             print("Failed to create output audio unit: \(status)")
             return false
         }
 
-        // Set the output format
         var asbd = AudioFormatSettings.createASBD()
         status = AudioUnitSetProperty(outputAudioUnit!,
                                     kAudioUnitProperty_StreamFormat,
                                     kAudioUnitScope_Input,
-                                    0, // Output element
+                                    0,
                                     &asbd,
                                     UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         guard status == noErr else {
@@ -366,7 +362,6 @@ public class AudioProcessor {
             return false
         }
 
-        // Set the output callback
         var outputCallbackStruct = AURenderCallbackStruct(
             inputProc: outputRenderCallback,
             inputProcRefCon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
@@ -383,7 +378,6 @@ public class AudioProcessor {
             return false
         }
 
-        // Set buffer size for lower latency
         var maxFramesPerSlice: UInt32 = AudioFormatSettings.framesPerBuffer
         status = AudioUnitSetProperty(outputAudioUnit!,
                                     kAudioUnitProperty_MaximumFramesPerSlice,
@@ -400,9 +394,18 @@ public class AudioProcessor {
     }
 }
 
-// MARK: - Audio Callbacks
+/**
+ Input render callback - called when audio is captured from the microphone
 
-/// Input render callback - called when audio is captured from the microphone
+ - Parameters:
+   - inRefCon: Reference to the AudioProcessor instance
+   - ioActionFlags: Flags that describe the operations to be performed
+   - inTimeStamp: The time at which the data will be rendered
+   - inBusNumber: The bus number for the render operation
+   - inNumberFrames: The number of frames to render
+   - ioData: The audio data to be rendered
+ - Returns: Status code indicating success or failure
+ */
 private func inputRenderCallback(
     inRefCon: UnsafeMutableRawPointer,
     ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
@@ -411,10 +414,8 @@ private func inputRenderCallback(
     inNumberFrames: UInt32,
     ioData: UnsafeMutablePointer<AudioBufferList>?) -> OSStatus {
 
-    // Get reference to the AudioProcessor instance
     let audioProcessor = Unmanaged<AudioProcessor>.fromOpaque(inRefCon).takeUnretainedValue()
 
-    // Create an AudioBufferList to hold the captured audio
     var bufferList = AudioBufferList()
     bufferList.mNumberBuffers = 1
 
@@ -422,38 +423,43 @@ private func inputRenderCallback(
     buffer.mNumberChannels = AudioProcessor.AudioFormatSettings.channelCount
     buffer.mDataByteSize = inNumberFrames * AudioProcessor.AudioFormatSettings.bytesPerSample
 
-    // Allocate memory for the audio data
     let audioData = UnsafeMutablePointer<Float>.allocate(capacity: Int(inNumberFrames))
     buffer.mData = UnsafeMutableRawPointer(audioData)
 
     bufferList.mBuffers = buffer
 
-    // Render the audio from the input source
     let inputUnit = audioProcessor.inputAudioUnit!
     let status = AudioUnitRender(inputUnit, ioActionFlags, inTimeStamp, inBusNumber, inNumberFrames, &bufferList)
 
     if status == noErr {
-        // Create a Swift array from the captured audio data
         let bufferPointer = UnsafeBufferPointer<Float>(start: audioData, count: Int(inNumberFrames))
         let capturedBuffer = Array(bufferPointer)
 
-        // Record capture timestamp for latency measurement
         let timestamp = CFAbsoluteTimeGetCurrent()
         audioProcessor.captureTimestamps.append(timestamp)
 
-        // Store the captured audio in the AudioProcessor
         audioProcessor.bufferLock.lock()
         audioProcessor.capturedAudioBuffer = capturedBuffer
         audioProcessor.bufferLock.unlock()
     }
 
-    // Clean up
     audioData.deallocate()
 
     return status
 }
 
-/// Output render callback - called when audio output is needed
+/**
+ Output render callback - called when audio output is needed
+
+ - Parameters:
+   - inRefCon: Reference to the AudioProcessor instance
+   - ioActionFlags: Flags that describe the operations to be performed
+   - inTimeStamp: The time at which the data will be rendered
+   - inBusNumber: The bus number for the render operation
+   - inNumberFrames: The number of frames to render
+   - ioData: The audio data to be rendered
+ - Returns: Status code indicating success or failure
+ */
 private func outputRenderCallback(
     inRefCon: UnsafeMutableRawPointer,
     ioActionFlags: UnsafeMutablePointer<AudioUnitRenderActionFlags>,
@@ -462,15 +468,12 @@ private func outputRenderCallback(
     inNumberFrames: UInt32,
     ioData: UnsafeMutablePointer<AudioBufferList>?) -> OSStatus {
 
-    // Get reference to the AudioProcessor instance
     let audioProcessor = Unmanaged<AudioProcessor>.fromOpaque(inRefCon).takeUnretainedValue()
 
-    // Get the output buffer
     guard let ioData = ioData, ioData.pointee.mNumberBuffers > 0 else {
         return kAudioUnitErr_InvalidParameter
     }
 
-    // Get pointer to output data
     let outputBuffer = UnsafeMutableAudioBufferListPointer(ioData)[0]
     guard let outputDataRaw = outputBuffer.mData else {
         return kAudioUnitErr_InvalidParameter
@@ -478,35 +481,29 @@ private func outputRenderCallback(
 
     let outputData = outputDataRaw.bindMemory(to: Float.self, capacity: Int(inNumberFrames))
 
-    // Process the audio
     audioProcessor.bufferLock.lock()
     var processedBuffer = audioProcessor.capturedAudioBuffer
     audioProcessor.bufferLock.unlock()
 
-    // Apply audio processing if callback is provided
     if let processingCallback = audioProcessor.audioProcessingCallback {
         processedBuffer = processingCallback(processedBuffer)
     }
 
-    // Record playback timestamp for latency measurement
     let timestamp = CFAbsoluteTimeGetCurrent()
     audioProcessor.playbackTimestamps.append(timestamp)
 
-    // Copy the processed audio to the output buffer
     let copyLength = min(Int(inNumberFrames), processedBuffer.count)
     if copyLength > 0 {
         for i in 0..<copyLength {
             outputData[i] = processedBuffer[i]
         }
 
-        // Fill the rest with zeros if needed
         if copyLength < Int(inNumberFrames) {
             for i in copyLength..<Int(inNumberFrames) {
                 outputData[i] = 0.0
             }
         }
     } else {
-        // If no audio is available, output silence
         for i in 0..<Int(inNumberFrames) {
             outputData[i] = 0.0
         }
