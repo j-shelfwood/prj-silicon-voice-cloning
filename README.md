@@ -52,11 +52,6 @@ The project involves:
 ## 🛠 Setup
 
 ```bash
-# Clone repository
-git clone https://github.com/yourusername/real-time-voice-cloning.git
-cd real-time-voice-cloning
-
-# Build and run Swift CLI application
 swift build
 swift run
 ```
