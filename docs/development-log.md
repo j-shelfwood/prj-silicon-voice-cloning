@@ -94,6 +94,57 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 ---
 
+## 2024-03-06: Real-Time Audio Processing Implementation
+
+### Progress Summary
+
+- Implemented real AudioUnit functionality for microphone input and audio output
+- Created a complete audio processing pipeline with callbacks for real-time audio processing
+- Added audio pass-through, latency testing, and DSP integration to the CLI interface
+- Implemented thread-safe audio buffer handling and latency measurement
+
+### Technical Details & Learnings
+
+#### Core Audio Implementation
+
+- Used `AudioComponentFindNext` and `AudioComponentInstanceNew` to create input/output AudioUnits
+- Set up HAL I/O for microphone input and DefaultOutput for speakers
+- Implemented render callbacks for both input and output processing
+- Buffer management is critical - used `NSLock` for thread-safe access to shared audio buffers
+- Created a processing chain: input callback → buffer → processing callback → output callback
+
+#### Swift and Audio Memory Management
+
+- Swift concurrency warnings around static mutable variables required adjustment:
+  - Replaced static `let asbd` with a function that creates a new ASBD when needed
+  - Used explicit locks to ensure thread safety with shared audio buffers
+- Memory management for audio data in C-style callbacks is tricky:
+  - Had to manually allocate and deallocate memory for the audio buffer in the callback
+  - Used `UnsafeMutablePointer<Float>` and `UnsafeBufferPointer` for efficient audio data handling
+
+#### Audio Pipeline Customization
+
+- Added a customizable audio processing callback to allow for flexible audio transformations
+- Implemented both streaming (real-time) mode and one-shot playback mode for testing
+- Frame size set to 512 samples (~11.6ms at 44.1kHz) for a good latency/stability balance
+- Used mono audio format (single channel) with 32-bit float samples for simplicity and quality
+
+### Next Steps
+
+1. Implement real-time FFT and spectral processing in the DSP module
+2. Create a more sophisticated audio buffer management system for handling variable-sized frames
+3. Begin researching and implementing voice conversion models suitable for real-time use
+4. Test latency in real-world scenarios to ensure we meet our <100ms target
+
+### Open Questions
+
+- How to optimize the audio pipeline for minimum latency while maintaining stability?
+- What's the optimal buffer size for our voice conversion application?
+- Do we need to implement a more sophisticated ring buffer for audio data?
+- How can we route the processed audio to Discord without excessive additional latency?
+
+---
+
 <!-- Template for future entries -->
 <!--
 ## YYYY-MM-DD: [Summary Title]
