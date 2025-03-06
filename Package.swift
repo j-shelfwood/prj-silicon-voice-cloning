@@ -53,6 +53,23 @@ let package = Package(
         .target(
             name: "Utilities",
             dependencies: []
+        ),
+        // Test targets
+        .testTarget(
+            name: "UtilitiesTests",
+            dependencies: ["Utilities"]
+        ),
+        .testTarget(
+            name: "DSPTests",
+            dependencies: ["DSP"]
+        ),
+        .testTarget(
+            name: "AudioProcessorTests",
+            dependencies: ["AudioProcessor"]
+        ),
+        .testTarget(
+            name: "FeatureTests",
+            dependencies: ["prj-silicon-voice-cloning", "AudioProcessor", "DSP", "ModelInference", "Utilities"]
         )
     ]
 )
