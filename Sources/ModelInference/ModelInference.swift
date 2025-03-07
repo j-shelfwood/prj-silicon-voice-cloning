@@ -1,14 +1,13 @@
 import Foundation
 import Utilities
+
 #if canImport(CoreML)
-import CoreML
+    import CoreML
 #endif
 
-/**
- Class for managing machine learning model inference with Core ML.
- Handles loading voice conversion models and performing inference
- with optimized hardware acceleration on Apple Silicon.
- */
+/// Class for managing machine learning model inference with Core ML.
+/// Handles loading voice conversion models and performing inference
+/// with optimized hardware acceleration on Apple Silicon.
 public class ModelInference {
 
     private var modelLoaded = false
@@ -52,9 +51,9 @@ public class ModelInference {
      */
     public func isCoreMLAvailable() -> Bool {
         #if canImport(CoreML)
-        return true
+            return true
         #else
-        return false
+            return false
         #endif
     }
 

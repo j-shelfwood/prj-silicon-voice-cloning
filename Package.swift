@@ -28,7 +28,7 @@ let package = Package(
         .library(
             name: "Utilities",
             targets: ["Utilities"]
-        )
+        ),
     ],
     dependencies: [
         // Dependencies will be added here if needed
@@ -68,8 +68,14 @@ let package = Package(
             dependencies: ["AudioProcessor"]
         ),
         .testTarget(
+            name: "ModelInferenceTests",
+            dependencies: ["ModelInference"]
+        ),
+        .testTarget(
             name: "FeatureTests",
-            dependencies: ["prj-silicon-voice-cloning", "AudioProcessor", "DSP", "ModelInference", "Utilities"]
-        )
+            dependencies: [
+                "prj-silicon-voice-cloning", "AudioProcessor", "DSP", "ModelInference", "Utilities",
+            ]
+        ),
     ]
 )

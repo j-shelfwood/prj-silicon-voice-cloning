@@ -1,23 +1,38 @@
-import Foundation
 import AudioProcessor
 import DSP
+import Foundation
 import ModelInference
 import Utilities
 
-Utilities.log("Real-Time Voice Cloning on Apple Silicon")
-Utilities.log("----------------------------------------")
-Utilities.log("Welcome to the CLI interface for real-time voice conversion!")
+@MainActor
+func main() async {
+    Utilities.log("Real-Time Voice Cloning on Apple Silicon")
+    Utilities.log("----------------------------------------")
+    Utilities.log("Welcome to the CLI interface for real-time voice conversion!")
 
-let audioProcessor = AudioProcessor()
-let dsp = DSP(fftSize: 1024)
-let modelInference = ModelInference()
+    let audioProcessor = AudioProcessor()
+    let dsp = DSP(fftSize: 1024)
+    let modelInference = ModelInference()
 
-handleCommandLineArguments()
+    await handleCommandLineArguments(
+        audioProcessor: audioProcessor, dsp: dsp, modelInference: modelInference)
+}
 
-/**
- Process command line arguments and execute the appropriate action
- */
-func handleCommandLineArguments() {
+// Call the async main function from the synchronous entry point and keep the program running
+let task = Task { @MainActor in
+    await main()
+}
+
+// Keep the program running until the task completes
+// This is necessary because Swift's async/await requires the program to stay alive
+// until async tasks complete
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 60))  // Allow up to 60 seconds for tasks to complete
+
+/// Process command line arguments and execute the appropriate action
+@MainActor
+func handleCommandLineArguments(
+    audioProcessor: AudioProcessor, dsp: DSP, modelInference: ModelInference
+) async {
     let arguments = CommandLine.arguments
 
     guard arguments.count > 1 else {
@@ -29,19 +44,19 @@ func handleCommandLineArguments() {
 
     switch command {
     case "test-audio":
-        testAudio()
+        await testAudio(audioProcessor: audioProcessor)
 
     case "test-passthrough":
-        testPassthrough()
+        await testPassthrough(audioProcessor: audioProcessor)
 
     case "test-latency":
-        testLatency()
+        await testLatency(audioProcessor: audioProcessor)
 
     case "test-dsp":
-        testDSP()
+        await testDSP(audioProcessor: audioProcessor, dsp: dsp)
 
     case "test-ml":
-        testML()
+        testML(modelInference: modelInference)
 
     case "help":
         showHelp()
@@ -52,9 +67,7 @@ func handleCommandLineArguments() {
     }
 }
 
-/**
- Display help information for all available commands
- */
+/// Display help information for all available commands
 func showHelp() {
     Utilities.log("\nUsage:")
     Utilities.log("  swift run prj-silicon-voice-cloning [command]")
@@ -67,29 +80,33 @@ func showHelp() {
     Utilities.log("  help             Show this help message")
 }
 
-/**
- Test audio playback using a sine wave
- */
-func testAudio() {
+/// Test audio playback using a sine wave
+@MainActor
+func testAudio(audioProcessor: AudioProcessor) async {
     Utilities.log("Testing audio output with a sine wave...")
 
     Utilities.startTimer(id: "sine_generation")
     let sineWave = Utilities.generateSineWave(frequency: 440.0, sampleRate: 44100.0, duration: 2.0)
     let generationTime = Utilities.endTimer(id: "sine_generation")
 
-    Utilities.log("Generated sine wave with \(sineWave.count) samples in \(String(format: "%.2f", generationTime))ms")
+    Utilities.log(
+        "Generated sine wave with \(sineWave.count) samples in \(String(format: "%.2f", generationTime))ms"
+    )
 
-    Utilities.log("Playing sine wave...")
-    let _ = audioProcessor.playAudio(sineWave)
+    // Reduce volume to 20% of original
+    let volumeScale: Float = 0.2
+    let quieterSineWave = sineWave.map { $0 * volumeScale }
+
+    Utilities.log("Playing sine wave at \(Int(volumeScale * 100))% volume...")
+    let _ = audioProcessor.playAudio(quieterSineWave)
 }
 
-/**
- Test real-time audio pass-through (microphone to speakers)
- */
-func testPassthrough() {
+/// Test real-time audio pass-through (microphone to speakers)
+@MainActor
+func testPassthrough(audioProcessor: AudioProcessor) async {
     Utilities.log("Testing audio pass-through (microphone → speakers)...")
     Utilities.log("This will capture audio from your microphone and play it through your speakers.")
-    Utilities.log("Press Ctrl+C to stop.")
+    Utilities.log("Press Enter to stop.")
 
     audioProcessor.audioProcessingCallback = { buffer in
         return buffer
@@ -97,16 +114,18 @@ func testPassthrough() {
 
     if audioProcessor.startCapture() {
         Utilities.log("Audio pass-through started. Speak into your microphone to hear your voice.")
-        RunLoop.main.run()
+
+        // Wait for user input instead of RunLoop.main.run()
+        _ = readLine()
+        audioProcessor.stopCapture()
     } else {
         Utilities.log("Failed to start audio pass-through!")
     }
 }
 
-/**
- Test and measure audio processing latency
- */
-func testLatency() {
+/// Test and measure audio processing latency
+@MainActor
+func testLatency(audioProcessor: AudioProcessor) async {
     Utilities.log("Testing audio processing latency...")
 
     audioProcessor.audioProcessingCallback = { buffer in
@@ -128,19 +147,25 @@ func testLatency() {
     }
 }
 
-/**
- Test DSP functionality with live audio
- */
-func testDSP() {
+/// Test DSP functionality with live audio
+@MainActor
+func testDSP(audioProcessor: AudioProcessor, dsp: DSP) async {
     Utilities.log("Testing DSP with live audio...")
 
-    audioProcessor.audioProcessingCallback = { buffer in
-        Utilities.startTimer(id: "fft")
-        let _ = dsp.performFFT(inputBuffer: buffer)
-        let fftTime = Utilities.endTimer(id: "fft")
+    audioProcessor.audioProcessingCallback = { [dsp] buffer in
+        Task { @MainActor in
+            Utilities.startTimer(id: "fft")
+        }
 
-        if Int.random(in: 0...100) < 5 {
-            Utilities.log("FFT processing time: \(String(format: "%.2f", fftTime)) ms")
+        let _ = dsp.performFFT(inputBuffer: buffer)
+
+        var fftTime: Double = 0
+        Task { @MainActor in
+            fftTime = Utilities.endTimer(id: "fft")
+
+            if Int.random(in: 0...100) < 5 {
+                Utilities.log("FFT processing time: \(String(format: "%.2f", fftTime)) ms")
+            }
         }
 
         return buffer
@@ -157,10 +182,9 @@ func testDSP() {
     }
 }
 
-/**
- Test ML capabilities of the system
- */
-func testML() {
+/// Test ML capabilities of the system
+@MainActor
+func testML(modelInference: ModelInference) {
     Utilities.log("Testing ML capabilities...")
     Utilities.log("Core ML available: \(modelInference.isCoreMLAvailable())")
     Utilities.log(modelInference.getAvailableComputeUnits())

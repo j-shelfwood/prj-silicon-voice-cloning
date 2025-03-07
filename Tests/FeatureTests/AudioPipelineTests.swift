@@ -1,17 +1,50 @@
 import XCTest
+
 @testable import AudioProcessor
 @testable import DSP
+@testable import ModelInference
 @testable import Utilities
 
 final class AudioPipelineTests: XCTestCase {
+    // Flag to control whether to use the real implementation or mock
+    // Set to false to avoid actual audio playback and microphone access
+    let useRealAudioHardware = false
+
+    // Audio processor - either real or mock
+    var audioProcessor: AudioProcessorProtocol!
+    var dsp: DSP!
+    var modelInference: ModelInference!
+
+    override func setUp() {
+        super.setUp()
+
+        // Initialize the DSP and ModelInference components
+        dsp = DSP(fftSize: 1024)
+        modelInference = ModelInference()
+
+        // Choose which audio processor implementation to use
+        if useRealAudioHardware {
+            audioProcessor = AudioProcessor()
+        } else {
+            audioProcessor = MockAudioProcessor()
+        }
+    }
+
+    override func tearDown() {
+        audioProcessor.stopCapture()
+        audioProcessor = nil
+        dsp = nil
+        modelInference = nil
+        super.tearDown()
+    }
+
     func testAudioPassthrough() throws {
         // This test will verify that audio can pass through our pipeline
         // For now, it's a basic test with placeholder functionality
 
-        let audioProcessor = AudioProcessor()
-
         // Generate a test sine wave
-        let sineWave = Utilities.generateSineWave(frequency: 440.0, sampleRate: 44100.0, duration: 0.5)
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: 44100.0, duration: 0.5)
 
         // Test audio playback (this is just calling the method since implementation is still a placeholder)
         let result = audioProcessor.playAudio(sineWave)
@@ -29,8 +62,6 @@ final class AudioPipelineTests: XCTestCase {
 
         // This will eventually measure the latency of our audio pipeline
         /*
-        let audioProcessor = AudioProcessor()
-
         // Start capturing audio
         let captureResult = audioProcessor.startCapture()
         XCTAssertTrue(captureResult, "Audio capture should start successfully")
@@ -42,7 +73,114 @@ final class AudioPipelineTests: XCTestCase {
         audioProcessor.stopCapture()
 
         // Check the measured latency (will implement once we have real audio processing)
-        // XCTAssertLessThan(audioProcessor.measuredLatency, 100.0, "Audio latency should be under 100ms")
+        XCTAssertLessThan(audioProcessor.measuredLatency, 100.0, "Audio latency should be under 100ms")
+        */
+    }
+
+    func testAudioProcessingPipeline() throws {
+        // This test verifies the complete audio processing pipeline
+        // from input to DSP processing to model inference
+
+        // Generate a test sine wave
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: 44100.0, duration: 1.0)
+
+        // Set up the audio processing callback that uses DSP and ModelInference
+        audioProcessor.audioProcessingCallback = { [weak self] (buffer: [Float]) -> [Float] in
+            guard let self = self else { return buffer }
+
+            // Step 1: Perform FFT on the input buffer
+            let _ = self.dsp.performFFT(inputBuffer: buffer)
+
+            // Step 2: Generate spectrogram
+            let spectrogram = self.dsp.generateSpectrogram(inputBuffer: buffer)
+
+            // Step 3: Convert to mel spectrogram
+            let _ = self.dsp.specToMelSpec(spectrogram: spectrogram)
+
+            // Step 4: Run inference (placeholder for now)
+            // In a real implementation, we would pass the mel spectrogram to the model
+            // and get back the transformed audio
+
+            // For now, just return the original buffer
+            return buffer
+        }
+
+        // Test the pipeline with a simple playback
+        let result = audioProcessor.playAudio(sineWave)
+        XCTAssertTrue(result, "Audio pipeline playback should succeed")
+    }
+
+    func testEndToEndVoiceConversion() throws {
+        // Skip this test until we have actual voice conversion models
+        throw XCTSkip("Skipping end-to-end test until voice conversion models are implemented")
+
+        /*
+        // Load a voice conversion model
+        let modelPath = "/path/to/model.mlmodel"
+        let modelLoaded = modelInference.loadModel(modelPath: modelPath)
+        XCTAssertTrue(modelLoaded, "Model should load successfully")
+
+        // Set up the audio processing pipeline
+        audioProcessor.audioProcessingCallback = { [weak self] buffer in
+            guard let self = self else { return buffer }
+
+            // Process audio through DSP
+            let spectrum = self.dsp.performFFT(inputBuffer: buffer)
+            let spectrogram = self.dsp.generateSpectrogram(inputBuffer: buffer)
+            let melSpectrogram = self.dsp.specToMelSpec(spectrogram: spectrogram)
+
+            // Run inference to convert voice
+            let convertedMelSpectrogram: [[Float]]? = self.modelInference.runInference(input: melSpectrogram)
+
+            // Convert back to audio (placeholder)
+            // In a real implementation, we would convert the mel spectrogram back to audio
+
+            return buffer
+        }
+
+        // Start audio capture and processing
+        let captureResult = audioProcessor.startCapture()
+        XCTAssertTrue(captureResult, "Audio capture should start successfully")
+
+        // Wait for some processing to happen
+        Thread.sleep(forTimeInterval: 2.0)
+
+        // Stop capturing
+        audioProcessor.stopCapture()
+
+        // Check latency
+        XCTAssertLessThan(audioProcessor.measuredLatency, 100.0, "End-to-end latency should be under 100ms")
+        */
+    }
+
+    func testPerformanceOfFullPipeline() throws {
+        // Skip this test until we have the full pipeline implemented
+        throw XCTSkip("Skipping performance test until full pipeline is implemented")
+
+        /*
+        // Generate a test signal
+        let sineWave = Utilities.generateSineWave(frequency: 440.0, sampleRate: 44100.0, duration: 5.0)
+
+        // Set up the audio processing callback
+        audioProcessor.audioProcessingCallback = { [weak self] buffer in
+            guard let self = self else { return buffer }
+
+            // Full processing pipeline
+            let spectrum = self.dsp.performFFT(inputBuffer: buffer)
+            let spectrogram = self.dsp.generateSpectrogram(inputBuffer: buffer)
+            let melSpectrogram = self.dsp.specToMelSpec(spectrogram: spectrogram)
+
+            // Run inference (placeholder)
+            // let result: [Float]? = self.modelInference.runInference(input: melSpectrogram)
+
+            return buffer
+        }
+
+        // Measure the performance of the full pipeline
+        measure {
+            _ = audioProcessor.playAudio(sineWave)
+        }
         */
     }
 }

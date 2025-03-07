@@ -1,4 +1,5 @@
 import XCTest
+
 @testable import Utilities
 
 final class UtilitiesTests: XCTestCase {
@@ -8,10 +9,13 @@ final class UtilitiesTests: XCTestCase {
         let sampleRate: Float = 44100.0
         let duration: Float = 0.1  // 100ms is enough for testing
 
-        let sineWave = Utilities.generateSineWave(frequency: frequency, sampleRate: sampleRate, duration: duration)
+        let sineWave = Utilities.generateSineWave(
+            frequency: frequency, sampleRate: sampleRate, duration: duration)
 
         // Check the length of the generated sine wave
-        XCTAssertEqual(sineWave.count, Int(sampleRate * duration), "Sine wave should have the expected number of samples")
+        XCTAssertEqual(
+            sineWave.count, Int(sampleRate * duration),
+            "Sine wave should have the expected number of samples")
 
         // Check the amplitude (should be between -1 and 1)
         for sample in sineWave {
@@ -23,15 +27,19 @@ final class UtilitiesTests: XCTestCase {
         // (440 cycles per second = 44 cycles in 0.1 seconds, each cycle has 2 zero crossings)
         var zeroCrossings = 0
         for i in 1..<sineWave.count {
-            if (sineWave[i-1] < 0 && sineWave[i] >= 0) || (sineWave[i-1] >= 0 && sineWave[i] < 0) {
+            if (sineWave[i - 1] < 0 && sineWave[i] >= 0)
+                || (sineWave[i - 1] >= 0 && sineWave[i] < 0)
+            {
                 zeroCrossings += 1
             }
         }
 
         // Allow for some margin of error due to sampling
         let expectedZeroCrossings = Int(frequency * duration * 2)
-        XCTAssertTrue(abs(zeroCrossings - expectedZeroCrossings) <= 2,
-                     "Zero crossings should be approximately \(expectedZeroCrossings), but was \(zeroCrossings)")
+        XCTAssertTrue(
+            abs(zeroCrossings - expectedZeroCrossings) <= 2,
+            "Zero crossings should be approximately \(expectedZeroCrossings), but was \(zeroCrossings)"
+        )
     }
 
     @MainActor
@@ -40,13 +48,40 @@ final class UtilitiesTests: XCTestCase {
         Utilities.startTimer(id: "test")
 
         // Sleep for a known duration
-        let sleepDuration = 0.1 // 100ms
+        let sleepDuration = 0.1  // 100ms
         Thread.sleep(forTimeInterval: sleepDuration)
 
         let elapsed = Utilities.endTimer(id: "test")
 
         // Check that the elapsed time is approximately correct (with some tolerance for timing variations)
-        XCTAssertTrue(elapsed >= sleepDuration * 1000 * 0.9, "Timer should measure at least 90% of the expected duration")
-        XCTAssertTrue(elapsed <= sleepDuration * 1000 * 1.5, "Timer should not measure more than 150% of the expected duration")
+        XCTAssertTrue(
+            elapsed >= sleepDuration * 1000 * 0.9,
+            "Timer should measure at least 90% of the expected duration")
+        XCTAssertTrue(
+            elapsed <= sleepDuration * 1000 * 1.5,
+            "Timer should not measure more than 150% of the expected duration")
+    }
+
+    func testLoggingFunctionality() {
+        // Since we can't easily capture stdout in Swift tests, we'll just verify that the log function doesn't crash
+        XCTAssertNoThrow(Utilities.log("Test log message"), "Logging should not throw an exception")
+
+        // Log multiple messages to ensure it handles different inputs correctly
+        XCTAssertNoThrow(Utilities.log(""), "Logging an empty string should not throw")
+        XCTAssertNoThrow(
+            Utilities.log("Special characters: !@#$%^&*()"),
+            "Logging special characters should not throw")
+        XCTAssertNoThrow(
+            Utilities.log("Unicode: 你好, 世界"), "Logging Unicode characters should not throw")
+    }
+
+    func testSineWaveGenerationPerformance() {
+        // Measure the performance of generating a long sine wave
+        measure {
+            for _ in 0..<10 {
+                _ = Utilities.generateSineWave(
+                    frequency: 440.0, sampleRate: 44100.0, duration: 10.0)
+            }
+        }
     }
 }
