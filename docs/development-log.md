@@ -326,6 +326,115 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 ---
 
+## 2025-03-08: Architectural Refactoring Plan
+
+### Progress Summary
+
+- Received and analyzed comprehensive refactoring proposal
+- Identified key areas for modularization and separation of concerns
+- Planned gradual migration strategy to maintain stability
+- Established new directory structure and module organization
+
+### Technical Details & Learnings
+
+#### Audio Processing Layer Refactoring
+
+- Current monolithic `AudioProcessor` to be split into:
+  - `AudioUnitManager`: Core AudioUnit configuration and management
+  - `AudioInputProcessor`: Input capture and buffering
+  - `AudioOutputProcessor`: Output playback and processing
+  - `RealTimeAudioPipeline`: Coordination and flow management
+- Benefits:
+  - Better separation of concerns
+  - Easier testing and optimization
+  - Clearer audio flow management
+  - Improved error handling and recovery
+
+#### DSP Layer Modularization
+
+- Current `DSP` class to be divided into:
+  - `FFTProcessor`: Isolated FFT and windowing operations
+  - `SpectrogramGenerator`: Spectrogram computation
+  - `MelSpectrogramConverter`: Mel-scale conversion
+  - `StreamingMelProcessor`: Real-time processing coordination
+- Benefits:
+  - Isolated DSP algorithms for better testing
+  - Clearer transformation pipeline
+  - Easier optimization of individual components
+  - Better separation of streaming vs. batch processing
+
+#### Model Inference Restructuring
+
+- Current `ModelInference` to be split into:
+  - `ModelLoader`: File I/O and model configuration
+  - `ModelRunner` protocol hierarchy: Specialized runners for each model type
+  - `PerformanceTracker`: Isolated metrics and monitoring
+- Benefits:
+  - Clear separation of model loading and inference
+  - Protocol-based design for better extensibility
+  - Isolated performance monitoring
+  - Easier testing and mocking
+
+#### Utilities and CLI Enhancement
+
+- Reorganizing utilities into focused modules:
+  - `TimerUtility`: Performance timing
+  - `LoggerUtility`: Structured logging
+  - `AudioSignalUtility`: Test signal generation
+- New `CommandRouter` for CLI organization
+- Benefits:
+  - Better organized utility functions
+  - Improved CLI interface
+  - Enhanced testing capabilities
+
+### Implementation Strategy
+
+1. **Phase 1: Foundation**
+   - Set up new directory structure
+   - Create new module interfaces
+   - Implement basic tests for new structure
+
+2. **Phase 2: Audio Layer**
+   - Implement `AudioUnitManager`
+   - Split input/output processing
+   - Create pipeline coordinator
+   - Migrate existing functionality
+
+3. **Phase 3: DSP Layer**
+   - Implement FFT isolation
+   - Create spectrogram modules
+   - Set up streaming processor
+   - Validate performance
+
+4. **Phase 4: ML Layer**
+   - Implement model loading separation
+   - Create model runner protocols
+   - Set up performance tracking
+   - Migrate existing models
+
+5. **Phase 5: Utilities & CLI**
+   - Split utility functions
+   - Implement command router
+   - Update documentation
+   - Complete test coverage
+
+### Next Steps
+
+1. Create new directory structure and placeholder files
+2. Begin with `AudioUnitManager` implementation
+3. Set up CI/CD pipeline for new structure
+4. Start gradual migration of existing functionality
+
+### Challenges & Considerations
+
+- Maintaining real-time performance during refactoring
+- Ensuring backward compatibility during migration
+- Managing increased complexity of more modules
+- Balancing separation of concerns with practical integration
+- Testing strategy for new modular structure
+
+---
+
 <!-- Template for future entries -->
 <!--
 ## YYYY-MM-DD: [Summary Title]
