@@ -41,65 +41,162 @@ final class DSPTests: XCTestCase {
         // Perform FFT on the sine wave
         let spectrum = dsp.performFFT(inputBuffer: sineWave)
 
-        // Since the current implementation is a placeholder, we can only test the output size
-        // Once the real implementation is added, we should test that the spectrum has a peak at the expected frequency
+        // Check the output size
         XCTAssertEqual(spectrum.count, 1024 / 2, "FFT output should have fftSize/2 elements")
 
-        // TODO: When real FFT implementation is added, test for peak at the expected frequency bin
-        // let expectedBin = Int(frequency / (sampleRate / Float(dsp.fftSize)))
-        // XCTAssertTrue(spectrum[expectedBin-1...expectedBin+1].contains(where: { $0 > spectrum.max()! * 0.8 }),
-        //               "FFT should show a peak near the input frequency")
+        // Test for peak at the expected frequency bin
+        // For a 1kHz tone at 44.1kHz sample rate with 1024-point FFT:
+        // bin = frequency * fftSize / sampleRate = 1000 * 1024 / 44100 ≈ 23.2
+        let expectedBin = Int(frequency / (sampleRate / Float(1024)))
+
+        // Find the peak bin
+        var peakBin = 0
+        var peakValue: Float = -Float.infinity
+        for (bin, value) in spectrum.enumerated() {
+            if value > peakValue {
+                peakValue = value
+                peakBin = bin
+            }
+        }
+
+        // Allow for some leakage due to windowing - the peak should be within ±2 bins
+        XCTAssertTrue(
+            abs(peakBin - expectedBin) <= 2,
+            "FFT should show a peak near bin \(expectedBin), but peak was at bin \(peakBin)"
+        )
+    }
+
+    func testPerformFFTWithSmallBuffer() {
+        // Test with a buffer smaller than FFT size
+        let smallBuffer = [Float](repeating: 0.0, count: 512)  // Half the FFT size
+
+        // Should not crash and return a buffer of the expected size
+        let spectrum = dsp.performFFT(inputBuffer: smallBuffer)
+        XCTAssertEqual(
+            spectrum.count, 1024 / 2,
+            "FFT output should have fftSize/2 elements even with small input")
     }
 
     func testGenerateSpectrogram() {
-        // Generate a test signal
+        // Generate a test signal with two different frequencies
+        let sampleRate: Float = 44100.0
+        let duration: Float = 0.5
+
+        // Create a signal that changes frequency halfway through
+        let halfSamples = Int(sampleRate * duration / 2)
+        let firstHalf = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration / 2)
+        let secondHalf = Utilities.generateSineWave(
+            frequency: 880.0, sampleRate: sampleRate, duration: duration / 2)
+
+        var combinedSignal = [Float](repeating: 0.0, count: firstHalf.count + secondHalf.count)
+        combinedSignal.replaceSubrange(0..<firstHalf.count, with: firstHalf)
+        combinedSignal.replaceSubrange(firstHalf.count..<combinedSignal.count, with: secondHalf)
+
+        // Generate spectrogram with default hop size
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: combinedSignal)
+
+        // Test that the spectrogram has the expected dimensions
+        let hopSize = 256  // Default hop size
+        let expectedFrames = (combinedSignal.count - 1024) / hopSize + 1
+
+        XCTAssertEqual(
+            spectrogram.count, expectedFrames,
+            "Spectrogram should have the expected number of frames"
+        )
+        XCTAssertEqual(
+            spectrogram[0].count, 1024 / 2,
+            "Each frame should have fftSize/2 frequency bins"
+        )
+
+        // Test with custom hop size
+        let customHopSize = 512
+        let spectrogramCustomHop = dsp.generateSpectrogram(
+            inputBuffer: combinedSignal, hopSize: customHopSize)
+        let expectedFramesCustomHop = (combinedSignal.count - 1024) / customHopSize + 1
+
+        XCTAssertEqual(
+            spectrogramCustomHop.count, expectedFramesCustomHop,
+            "Spectrogram with custom hop size should have the expected number of frames"
+        )
+
+        // Verify that the spectrogram captures the frequency change
+        // This is a basic check - we expect higher energy in different bins for the two halves
+        if spectrogram.count >= 2 {
+            // Get the bin indices for 440Hz and 880Hz
+            let bin440 = Int(440.0 * 1024.0 / sampleRate)
+            let bin880 = Int(880.0 * 1024.0 / sampleRate)
+
+            // Check early frame (should have more energy at 440Hz)
+            let earlyFrame = spectrogram[0]
+            // Check late frame (should have more energy at 880Hz)
+            let lateFrame = spectrogram[spectrogram.count - 1]
+
+            // Allow for some spectral leakage
+            let earlyEnergy440 = earlyFrame[
+                max(0, bin440 - 1)...min(earlyFrame.count - 1, bin440 + 1)
+            ].reduce(0, +)
+            let earlyEnergy880 = earlyFrame[
+                max(0, bin880 - 1)...min(earlyFrame.count - 1, bin880 + 1)
+            ].reduce(0, +)
+
+            let lateEnergy440 = lateFrame[max(0, bin440 - 1)...min(lateFrame.count - 1, bin440 + 1)]
+                .reduce(0, +)
+            let lateEnergy880 = lateFrame[max(0, bin880 - 1)...min(lateFrame.count - 1, bin880 + 1)]
+                .reduce(0, +)
+
+            // In the early frames, 440Hz should have more energy
+            XCTAssertGreaterThan(
+                earlyEnergy440, earlyEnergy880,
+                "Early frames should have more energy at 440Hz than 880Hz"
+            )
+
+            // In the late frames, 880Hz should have more energy
+            XCTAssertGreaterThan(
+                lateEnergy880, lateEnergy440,
+                "Late frames should have more energy at 880Hz than 440Hz"
+            )
+        }
+    }
+
+    func testGenerateSpectrogramWithSmallBuffer() {
+        // Test with a buffer smaller than FFT size
+        let smallBuffer = [Float](repeating: 0.0, count: 512)  // Half the FFT size
+
+        // Should return an empty array
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: smallBuffer)
+        XCTAssertEqual(
+            spectrogram.count, 0, "Spectrogram should be empty for input smaller than FFT size")
+    }
+
+    func testSpecToMelSpec() {
+        // Generate a real spectrogram to test with
         let sampleRate: Float = 44100.0
         let duration: Float = 0.5
         let sineWave = Utilities.generateSineWave(
             frequency: 440.0, sampleRate: sampleRate, duration: duration)
 
-        // Generate spectrogram with default hop size
         let spectrogram = dsp.generateSpectrogram(inputBuffer: sineWave)
-
-        // Test that the spectrogram has the expected dimensions
-        let hopSize = 256  // Default hop size
-        let expectedFrames = (sineWave.count - 1024) / hopSize + 1
-
-        XCTAssertEqual(
-            spectrogram.count, expectedFrames,
-            "Spectrogram should have the expected number of frames")
-        XCTAssertEqual(
-            spectrogram[0].count, 1024 / 2, "Each frame should have fftSize/2 frequency bins")
-
-        // Test with custom hop size
-        let customHopSize = 512
-        let spectrogramCustomHop = dsp.generateSpectrogram(
-            inputBuffer: sineWave, hopSize: customHopSize)
-        let expectedFramesCustomHop = (sineWave.count - 1024) / customHopSize + 1
-
-        XCTAssertEqual(
-            spectrogramCustomHop.count, expectedFramesCustomHop,
-            "Spectrogram with custom hop size should have the expected number of frames")
-    }
-
-    func testSpecToMelSpec() {
-        // Create a mock spectrogram
-        let mockSpectrogram = Array(
-            repeating: Array(repeating: Float(1.0), count: 1024 / 2), count: 10)
+        XCTAssertFalse(spectrogram.isEmpty, "Spectrogram should not be empty")
 
         // Convert to mel spectrogram
-        let melSpectrogram = dsp.specToMelSpec(spectrogram: mockSpectrogram)
+        let melSpectrogram = dsp.specToMelSpec(spectrogram: spectrogram)
 
-        // Test that the mel spectrogram has the same dimensions as the input
-        // (This is true for the placeholder implementation, but will change when real implementation is added)
+        // Test dimensions
         XCTAssertEqual(
-            melSpectrogram.count, mockSpectrogram.count,
-            "Mel spectrogram should have the same number of frames as the input spectrogram")
-        XCTAssertEqual(
-            melSpectrogram[0].count, mockSpectrogram[0].count,
-            "Mel spectrogram frames should have the same number of bins as the input spectrogram")
+            melSpectrogram.count, spectrogram.count,
+            "Mel spectrogram should have the same number of frames as the input spectrogram"
+        )
 
-        // TODO: When real implementation is added, test that the mel spectrogram has the expected number of mel bins
+        // Test that mel spectrogram has the expected number of mel bands (80 by default)
+        XCTAssertEqual(
+            melSpectrogram[0].count, 80,
+            "Mel spectrogram should have 80 mel bands"
+        )
+
+        // Test that the mel spectrogram has non-zero values
+        let hasNonZeroValues = melSpectrogram.flatMap { $0 }.contains { $0 != 0 }
+        XCTAssertTrue(hasNonZeroValues, "Mel spectrogram should contain non-zero values")
     }
 
     func testPerformanceOfFFT() {
@@ -114,6 +211,35 @@ final class DSPTests: XCTestCase {
             for _ in 0..<10 {  // Perform 10 FFTs to get a good measurement
                 _ = dsp.performFFT(inputBuffer: sineWave)
             }
+        }
+    }
+
+    func testPerformanceOfSpectrogram() {
+        // Generate a large test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 5.0  // 5 seconds of audio
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Measure the performance of the spectrogram generation
+        measure {
+            _ = dsp.generateSpectrogram(inputBuffer: sineWave, hopSize: 256)
+        }
+    }
+
+    func testPerformanceOfMelSpectrogram() {
+        // Generate a large test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 5.0  // 5 seconds of audio
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Generate spectrogram
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: sineWave, hopSize: 256)
+
+        // Measure the performance of the mel spectrogram conversion
+        measure {
+            _ = dsp.specToMelSpec(spectrogram: spectrogram)
         }
     }
 }

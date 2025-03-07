@@ -10,12 +10,12 @@ public class AudioProcessor {
     /**
      Audio format settings for consistent use throughout the audio pipeline
      */
-    struct AudioFormatSettings {
-        static let sampleRate: Double = 44100.0
-        static let channelCount: UInt32 = 1
-        static let bytesPerSample: UInt32 = 4
-        static let bitsPerChannel: UInt32 = 32
-        static let framesPerBuffer: UInt32 = 512
+    public struct AudioFormatSettings {
+        public static let sampleRate: Double = 44100.0
+        public static let channelCount: UInt32 = 1
+        public static let bytesPerSample: UInt32 = 4
+        public static let bitsPerChannel: UInt32 = 32
+        public static let framesPerBuffer: UInt32 = 512
 
         /**
          Creates a new AudioStreamBasicDescription with our standard format settings

@@ -199,6 +199,67 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 ---
 
+## 2025-03-07: DSP Implementation with Accelerate Framework
+
+### Progress Summary
+
+- Implemented real FFT functionality using Apple's Accelerate framework
+- Added proper spectrogram and mel-spectrogram generation
+- Created comprehensive test suite for DSP operations
+- Optimized memory management for real-time performance
+
+### Technical Details & Learnings
+
+#### Accelerate Framework Integration
+
+- Used `vDSP.FFT` for efficient Fast Fourier Transform operations
+- Implemented proper windowing with Hann window to reduce spectral leakage
+- Created safe memory management with `withUnsafeMutableBufferPointer` for C interoperability
+- Achieved excellent performance: FFT processing in microseconds, spectrogram generation in ~6ms
+
+#### Swift Memory Management
+
+- Swift's memory safety features required careful handling of unsafe pointers:
+  - Used `withUnsafeMutableBufferPointer` to safely work with C APIs
+  - Properly managed memory allocation and deallocation in FFT operations
+  - Created safe abstractions around low-level vDSP functions
+- Learned that Swift 6.0 has stricter requirements for pointer handling
+
+#### DSP Algorithm Implementation
+
+- Implemented complete audio processing pipeline:
+  - FFT with proper windowing and scaling
+  - Spectrogram generation with overlapping frames
+  - Mel-spectrogram conversion using filterbank matrix
+- Added robust error handling for edge cases:
+  - Input buffers smaller than FFT size
+  - Empty spectrograms
+  - Buffer boundary handling
+
+#### Performance Optimization
+
+- Measured performance of critical operations:
+  - FFT: ~0.0001 seconds per frame
+  - Spectrogram generation: ~0.006 seconds for 5 seconds of audio
+  - Mel-spectrogram conversion: ~0.028 seconds for full spectrogram
+- These performance metrics confirm we can achieve real-time processing
+
+### Next Steps
+
+1. Implement the mel-filterbank creation function with proper frequency scaling
+2. Connect DSP module with ModelInference for complete voice conversion pipeline
+3. Optimize for real-time performance, potentially using Metal for GPU acceleration
+4. Implement voice conversion models that work with our mel-spectrograms
+
+### Challenges & Solutions
+
+- Memory management issues: Solved with proper use of Swift's pointer APIs
+- Module accessibility: Fixed by making AudioFormatSettings public
+- Performance concerns: Addressed through careful optimization and benchmarking
+- Edge cases: Added robust error handling for various input conditions
+
+---
+
 <!-- Template for future entries -->
 <!--
 ## YYYY-MM-DD: [Summary Title]
