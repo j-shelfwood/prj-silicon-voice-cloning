@@ -78,27 +78,29 @@ final class DSPTests: XCTestCase {
     }
 
     func testGenerateSpectrogram() {
-        // Generate a test signal with two different frequencies
-        let sampleRate: Float = 44100.0
-        let duration: Float = 0.5
-
         // Create a signal that changes frequency halfway through
-        let halfSamples = Int(sampleRate * duration / 2)
+        let sampleRate: Float = 44100
+        let duration: Float = 1.0
         let firstHalf = Utilities.generateSineWave(
             frequency: 440.0, sampleRate: sampleRate, duration: duration / 2)
         let secondHalf = Utilities.generateSineWave(
             frequency: 880.0, sampleRate: sampleRate, duration: duration / 2)
 
-        var combinedSignal = [Float](repeating: 0.0, count: firstHalf.count + secondHalf.count)
-        combinedSignal.replaceSubrange(0..<firstHalf.count, with: firstHalf)
-        combinedSignal.replaceSubrange(firstHalf.count..<combinedSignal.count, with: secondHalf)
+        // Combine the two halves
+        var signal = [Float](repeating: 0.0, count: Int(sampleRate * duration))
+        for i in 0..<firstHalf.count {
+            signal[i] = firstHalf[i]
+        }
+        for i in 0..<secondHalf.count {
+            signal[i + firstHalf.count] = secondHalf[i]
+        }
 
         // Generate spectrogram with default hop size
-        let spectrogram = dsp.generateSpectrogram(inputBuffer: combinedSignal)
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: signal)
 
         // Test that the spectrogram has the expected dimensions
         let hopSize = 256  // Default hop size
-        let expectedFrames = (combinedSignal.count - 1024) / hopSize + 1
+        let expectedFrames = (signal.count - 1024) / hopSize + 1
 
         XCTAssertEqual(
             spectrogram.count, expectedFrames,
@@ -112,8 +114,8 @@ final class DSPTests: XCTestCase {
         // Test with custom hop size
         let customHopSize = 512
         let spectrogramCustomHop = dsp.generateSpectrogram(
-            inputBuffer: combinedSignal, hopSize: customHopSize)
-        let expectedFramesCustomHop = (combinedSignal.count - 1024) / customHopSize + 1
+            inputBuffer: signal, hopSize: customHopSize)
+        let expectedFramesCustomHop = (signal.count - 1024) / customHopSize + 1
 
         XCTAssertEqual(
             spectrogramCustomHop.count, expectedFramesCustomHop,
@@ -170,33 +172,93 @@ final class DSPTests: XCTestCase {
     }
 
     func testSpecToMelSpec() {
-        // Generate a real spectrogram to test with
-        let sampleRate: Float = 44100.0
+        // Generate a real spectrogram using a sine wave
+        let sampleRate: Float = 44100
         let duration: Float = 0.5
-        let sineWave = Utilities.generateSineWave(
+        let signal = Utilities.generateSineWave(
             frequency: 440.0, sampleRate: sampleRate, duration: duration)
 
-        let spectrogram = dsp.generateSpectrogram(inputBuffer: sineWave)
+        // Generate spectrogram
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: signal)
         XCTAssertFalse(spectrogram.isEmpty, "Spectrogram should not be empty")
 
         // Convert to mel spectrogram
-        let melSpectrogram = dsp.specToMelSpec(spectrogram: spectrogram)
+        let melSpec = dsp.specToMelSpec(spectrogram: spectrogram)
 
-        // Test dimensions
+        // Check dimensions
         XCTAssertEqual(
-            melSpectrogram.count, spectrogram.count,
-            "Mel spectrogram should have the same number of frames as the input spectrogram"
-        )
+            melSpec.count, spectrogram.count,
+            "Mel spectrogram should have same number of frames as spectrogram")
+        XCTAssertEqual(melSpec[0].count, 40, "Mel spectrogram should have 40 mel bands")
 
-        // Test that mel spectrogram has the expected number of mel bands (80 by default)
+        // Check values
+        for frame in melSpec {
+            XCTAssertFalse(frame.isEmpty, "Mel spectrogram frame should not be empty")
+            for value in frame {
+                XCTAssertFalse(value.isNaN, "Mel spectrogram should not contain NaN values")
+                XCTAssertFalse(
+                    value.isInfinite, "Mel spectrogram should not contain infinite values")
+                XCTAssertGreaterThanOrEqual(
+                    value, 0, "Mel spectrogram values should be non-negative")
+            }
+        }
+
+        // Test with empty input
+        let emptyMelSpec = dsp.specToMelSpec(spectrogram: [])
+        XCTAssertTrue(emptyMelSpec.isEmpty, "Mel spectrogram should be empty for empty input")
+    }
+
+    func testMelToLogMel() {
+        // Generate a real spectrogram using a sine wave
+        let sampleRate: Float = 44100
+        let duration: Float = 0.5
+        let signal = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Generate spectrogram and convert to mel spectrogram
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: signal)
+        let melSpec = dsp.specToMelSpec(spectrogram: spectrogram)
+
+        // Convert to log-mel spectrogram
+        let logMelSpec = dsp.melToLogMel(melSpectrogram: melSpec)
+
+        // Check dimensions
         XCTAssertEqual(
-            melSpectrogram[0].count, 80,
-            "Mel spectrogram should have 80 mel bands"
-        )
+            logMelSpec.count, melSpec.count,
+            "Log-mel spectrogram should have same number of frames as mel spectrogram")
+        XCTAssertEqual(logMelSpec[0].count, 40, "Log-mel spectrogram should have 40 mel bands")
 
-        // Test that the mel spectrogram has non-zero values
-        let hasNonZeroValues = melSpectrogram.flatMap { $0 }.contains { $0 != 0 }
-        XCTAssertTrue(hasNonZeroValues, "Mel spectrogram should contain non-zero values")
+        // Check values
+        var hasValues = false
+        var minValue: Float = 0
+        var maxValue: Float = -Float.infinity
+
+        for frame in logMelSpec {
+            XCTAssertFalse(frame.isEmpty, "Log-mel spectrogram frame should not be empty")
+            for value in frame {
+                XCTAssertFalse(value.isNaN, "Log-mel spectrogram should not contain NaN values")
+                XCTAssertFalse(
+                    value.isInfinite, "Log-mel spectrogram should not contain infinite values")
+
+                if !hasValues {
+                    minValue = value
+                    maxValue = value
+                    hasValues = true
+                } else {
+                    minValue = min(minValue, value)
+                    maxValue = max(maxValue, value)
+                }
+            }
+        }
+
+        // Check that values are in dB scale (should be <= 0)
+        XCTAssertLessThanOrEqual(maxValue, 0.0, "Maximum log-mel value should be <= 0 dB")
+        XCTAssertGreaterThanOrEqual(minValue, -80.0, "Minimum log-mel value should be >= -80 dB")
+
+        // Test with empty input
+        let emptyLogMelSpec = dsp.melToLogMel(melSpectrogram: [])
+        XCTAssertTrue(
+            emptyLogMelSpec.isEmpty, "Log-mel spectrogram should be empty for empty input")
     }
 
     func testPerformanceOfFFT() {
@@ -240,6 +302,23 @@ final class DSPTests: XCTestCase {
         // Measure the performance of the mel spectrogram conversion
         measure {
             _ = dsp.specToMelSpec(spectrogram: spectrogram)
+        }
+    }
+
+    func testPerformanceOfLogMelSpectrogram() {
+        // Generate a large test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 5.0  // 5 seconds of audio
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Generate spectrogram and mel spectrogram
+        let spectrogram = dsp.generateSpectrogram(inputBuffer: sineWave, hopSize: 256)
+        let melSpectrogram = dsp.specToMelSpec(spectrogram: spectrogram)
+
+        // Measure the performance of the log-mel spectrogram conversion
+        measure {
+            _ = dsp.melToLogMel(melSpectrogram: melSpectrogram)
         }
     }
 }
