@@ -150,37 +150,41 @@ public class MelSpectrogramConverter {
             return []
         }
 
-        var logMelSpectrogram: [[Float]] = []
-        let minDb: Float = -80.0  // Minimum dB value to clip to
+        let numFrames = melSpectrogram.count
+        let numBands = melSpectrogram[0].count
+        var minDb: Float = -80.0  // Minimum dB value to clip to
 
-        // Find the maximum value in the mel spectrogram for normalization
+        // Flatten the mel spectrogram for vectorized operations
+        let flatMel = melSpectrogram.flatMap { $0 }
+
+        // Find maximum value using vDSP
         var maxValue: Float = 0.0
-        for frame in melSpectrogram {
-            for value in frame {
-                maxValue = max(maxValue, value)
-            }
-        }
+        vDSP_maxv(flatMel, 1, &maxValue, vDSP_Length(flatMel.count))
+        maxValue = max(maxValue, 1e-5)  // Avoid division by zero
 
-        // If maxValue is too small, use a default value to avoid division by zero
-        maxValue = max(maxValue, 1e-5)
+        // Create buffer for results
+        var logMelFlat = [Float](repeating: 0.0, count: flatMel.count)
 
-        for frame in melSpectrogram {
-            var logMelFrame: [Float] = []
+        // Clip values to floor
+        var floorValue = floor
+        vDSP_vclip(flatMel, 1, &floorValue, &maxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
 
-            for value in frame {
-                // Clip small values to avoid log(0)
-                let clippedValue = max(value, floor)
+        // Normalize by maxValue
+        var recipMaxValue = 1.0 / maxValue
+        vDSP_vsmul(logMelFlat, 1, &recipMaxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
 
-                // Calculate log10 manually and convert to dB
-                let logValue = 10.0 * log10(clippedValue / maxValue)
+        // Convert to log scale (10 * log10(x))
+        var ten: Float = 10.0
+        vDSP_vdbcon(logMelFlat, 1, &ten, &logMelFlat, 1, vDSP_Length(flatMel.count), 1)
 
-                // Clip to minimum dB
-                let clippedLogValue = max(logValue, minDb)
+        // Clip to minimum dB
+        vDSP_vclip(logMelFlat, 1, &minDb, &maxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
 
-                logMelFrame.append(clippedLogValue)
-            }
-
-            logMelSpectrogram.append(logMelFrame)
+        // Reshape back to 2D array
+        var logMelSpectrogram = [[Float]](repeating: [], count: numFrames)
+        for i in 0..<numFrames {
+            let start = i * numBands
+            logMelSpectrogram[i] = Array(logMelFlat[start..<start + numBands])
         }
 
         return logMelSpectrogram
