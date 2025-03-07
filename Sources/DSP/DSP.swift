@@ -6,6 +6,7 @@ import Utilities
 /// Class for audio signal processing operations using Apple's Accelerate framework.
 /// Provides functionality for converting time-domain audio signals into frequency
 /// domain representations required for voice conversion models.
+/// DSP: Digital Signal Processing
 public class DSP {
 
     private var fftSetup: vDSP.FFT<DSPSplitComplex>?

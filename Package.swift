@@ -14,6 +14,10 @@ let package = Package(
             targets: ["prj-silicon-voice-cloning"]
         ),
         .library(
+            name: "Audio",
+            targets: ["Audio"]
+        ),
+        .library(
             name: "AudioProcessor",
             targets: ["AudioProcessor"]
         ),
@@ -36,11 +40,15 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "prj-silicon-voice-cloning",
-            dependencies: ["AudioProcessor", "DSP", "ModelInference", "Utilities"]
+            dependencies: ["Audio", "AudioProcessor", "DSP", "ModelInference", "Utilities"]
+        ),
+        .target(
+            name: "Audio",
+            dependencies: ["Utilities"]
         ),
         .target(
             name: "AudioProcessor",
-            dependencies: []
+            dependencies: ["Audio"]
         ),
         .target(
             name: "DSP",
@@ -55,6 +63,10 @@ let package = Package(
             dependencies: []
         ),
         // Test targets
+        .testTarget(
+            name: "AudioTests",
+            dependencies: ["Audio"]
+        ),
         .testTarget(
             name: "UtilitiesTests",
             dependencies: ["Utilities"]
@@ -74,7 +86,8 @@ let package = Package(
         .testTarget(
             name: "FeatureTests",
             dependencies: [
-                "prj-silicon-voice-cloning", "AudioProcessor", "DSP", "ModelInference", "Utilities",
+                "prj-silicon-voice-cloning", "Audio", "AudioProcessor", "DSP", "ModelInference",
+                "Utilities",
             ]
         ),
     ]
