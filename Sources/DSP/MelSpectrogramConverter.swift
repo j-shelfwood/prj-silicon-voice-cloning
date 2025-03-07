@@ -1,3 +1,4 @@
+import Accelerate
 import Foundation
 import Utilities
 
@@ -10,6 +11,11 @@ public class MelSpectrogramConverter {
     private let maxFrequency: Float
     private let useHTK: Bool
     private var melFilterbank: [[Float]]?
+
+    // Cache for vectorized operations
+    private var flatFilterbank: [Float]?
+    private var filterBankStrides: [Int]?
+    private var lastSpectrogramWidth: Int?
 
     /**
      Initialize a new MelSpectrogramConverter instance.
@@ -50,14 +56,23 @@ public class MelSpectrogramConverter {
         let numFrames = spectrogram.count
         let numFreqBins = spectrogram[0].count
 
-        // Create mel filterbank if not already created
-        if melFilterbank == nil {
-            melFilterbank = createMelFilterbank(
-                fftSize: numFreqBins * 2  // Multiply by 2 because spectrogram has fftSize/2 bins
-            )
+        // Create or update mel filterbank if needed
+        if melFilterbank == nil || lastSpectrogramWidth != numFreqBins {
+            melFilterbank = createMelFilterbank(fftSize: numFreqBins * 2)
+            lastSpectrogramWidth = numFreqBins
+
+            // Prepare vectorized filterbank
+            if let fb = melFilterbank {
+                // Flatten the filterbank for vectorized operations
+                flatFilterbank = fb.flatMap { $0 }
+                filterBankStrides = Array(repeating: numFreqBins, count: melBands)
+            }
         }
 
-        guard let filterbank = melFilterbank else {
+        guard melFilterbank != nil,
+            let flatFB = flatFilterbank,
+            filterBankStrides != nil
+        else {
             Utilities.log("Error: Failed to create mel filterbank")
             return []
         }
@@ -65,24 +80,54 @@ public class MelSpectrogramConverter {
         var melSpectrogram = [[Float]](
             repeating: [Float](repeating: 0.0, count: melBands), count: numFrames)
 
-        // Apply mel filterbank to each frame
+        // Flatten the input spectrogram for vectorized operations
+        let flatSpectrogram = spectrogram.flatMap { $0 }
+
+        // Process each frame using vDSP
         for i in 0..<numFrames {
-            for j in 0..<melBands {
-                var sum: Float = 0.0
-                for k in 0..<numFreqBins {
-                    if k < filterbank[j].count {
-                        sum += spectrogram[i][k] * filterbank[j][k]
+            let frameStart = i * numFreqBins
+            let frame = Array(flatSpectrogram[frameStart..<frameStart + numFreqBins])
+
+            // Create mutable array for the frame result
+            var frameResult = [Float](repeating: 0.0, count: melBands)
+
+            // Perform matrix multiplication using vDSP
+            frameResult.withUnsafeMutableBufferPointer { resultPtr in
+                frame.withUnsafeBufferPointer { framePtr in
+                    vDSP_mmul(
+                        flatFB,  // Matrix A (filterbank)
+                        1,  // A row stride
+                        framePtr.baseAddress!,  // Matrix B (spectrogram frame)
+                        1,  // B row stride
+                        resultPtr.baseAddress!,  // Result matrix C
+                        1,  // C row stride
+                        vDSP_Length(melBands),  // Number of rows in A and C
+                        1,  // Number of columns in B and C
+                        vDSP_Length(numFreqBins)  // Number of columns in A and rows in B
+                    )
+                }
+            }
+
+            // Ensure non-negative values using vDSP_vclip
+            var minVal: Float = 0.0
+            var maxVal: Float = Float.infinity
+            frameResult.withUnsafeMutableBufferPointer { ptr in
+                withUnsafePointer(to: &minVal) { minPtr in
+                    withUnsafePointer(to: &maxVal) { maxPtr in
+                        vDSP_vclip(
+                            ptr.baseAddress!,
+                            1,
+                            minPtr,
+                            maxPtr,
+                            ptr.baseAddress!,
+                            1,
+                            vDSP_Length(melBands)
+                        )
                     }
                 }
-                melSpectrogram[i][j] = sum
             }
-        }
 
-        // Ensure all values are non-negative
-        for i in 0..<numFrames {
-            for j in 0..<melBands {
-                melSpectrogram[i][j] = max(0.0, melSpectrogram[i][j])
-            }
+            melSpectrogram[i] = frameResult
         }
 
         return melSpectrogram
