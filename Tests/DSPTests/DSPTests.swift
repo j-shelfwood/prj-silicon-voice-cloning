@@ -321,4 +321,263 @@ final class DSPTests: XCTestCase {
             _ = dsp.melToLogMel(melSpectrogram: melSpectrogram)
         }
     }
+
+    // MARK: - StreamingMelProcessor Tests
+
+    func testStreamingMelProcessorInitialization() {
+        let processor = StreamingMelProcessor(
+            fftSize: 1024,
+            hopSize: 256,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        XCTAssertNotNil(processor, "StreamingMelProcessor should initialize successfully")
+        XCTAssertEqual(processor.getBufferLength(), 0, "Initial buffer should be empty")
+    }
+
+    func testStreamingMelProcessorAddSamples() {
+        let processor = StreamingMelProcessor(
+            fftSize: 1024,
+            hopSize: 256,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Add some samples
+        let samples = [Float](repeating: 0.5, count: 500)
+        processor.addSamples(samples)
+
+        XCTAssertEqual(processor.getBufferLength(), 500, "Buffer should contain added samples")
+
+        // Add more samples
+        processor.addSamples(samples)
+        XCTAssertEqual(processor.getBufferLength(), 1000, "Buffer should contain all added samples")
+
+        // Add enough samples to trigger buffer trimming
+        let largeSamples = [Float](repeating: 0.5, count: 4000)
+        processor.addSamples(largeSamples)
+
+        // Buffer should be trimmed to maxBufferSize (fftSize * 3 = 3072)
+        XCTAssertEqual(
+            processor.getBufferLength(), 3072, "Buffer should be trimmed to maxBufferSize")
+
+        // Reset buffer
+        processor.reset()
+        XCTAssertEqual(processor.getBufferLength(), 0, "Buffer should be empty after reset")
+    }
+
+    func testStreamingMelProcessorWithInsufficientSamples() {
+        let processor = StreamingMelProcessor(
+            fftSize: 1024,
+            hopSize: 256,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Add fewer samples than fftSize
+        let samples = [Float](repeating: 0.5, count: 512)
+        processor.addSamples(samples)
+
+        // Should return empty results since we don't have enough samples
+        let (melFrames, samplesConsumed) = processor.processMelSpectrogram()
+
+        XCTAssertTrue(melFrames.isEmpty, "Should return empty mel frames with insufficient samples")
+        XCTAssertEqual(samplesConsumed, 0, "No samples should be consumed with insufficient data")
+        XCTAssertEqual(processor.getBufferLength(), 512, "Buffer should remain unchanged")
+    }
+
+    func testStreamingMelProcessorProcessing() {
+        let fftSize = 1024
+        let hopSize = 256
+        let processor = StreamingMelProcessor(
+            fftSize: fftSize,
+            hopSize: hopSize,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Generate a test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 0.5  // 0.5 seconds
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Add all samples at once
+        processor.addSamples(sineWave)
+
+        // Process all available frames
+        let (melFrames, samplesConsumed) = processor.processMelSpectrogram()
+
+        // Verify we got some frames
+        XCTAssertFalse(melFrames.isEmpty, "Should generate at least one frame")
+        XCTAssertEqual(melFrames[0].count, 40, "Each frame should have 40 mel bands")
+
+        // Verify some samples were consumed
+        XCTAssertGreaterThan(samplesConsumed, 0, "Should consume some samples")
+
+        // Buffer should have remaining samples or be empty
+        XCTAssertLessThanOrEqual(
+            processor.getBufferLength(), sineWave.count, "Buffer should not grow")
+    }
+
+    func testStreamingMelProcessorChunkedProcessing() {
+        let fftSize = 1024
+        let hopSize = 256
+        let processor = StreamingMelProcessor(
+            fftSize: fftSize,
+            hopSize: hopSize,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Generate a test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 1.0  // 1 second
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Split into chunks
+        let chunkSize = 1000
+        var allMelFrames: [[Float]] = []
+        var totalSamplesConsumed = 0
+
+        for i in stride(from: 0, to: sineWave.count, by: chunkSize) {
+            let end = min(i + chunkSize, sineWave.count)
+            let chunk = Array(sineWave[i..<end])
+
+            // Add chunk to processor
+            processor.addSamples(chunk)
+
+            // Process available frames
+            let (melFrames, samplesConsumed) = processor.processMelSpectrogram()
+            allMelFrames.append(contentsOf: melFrames)
+            totalSamplesConsumed += samplesConsumed
+        }
+
+        // Process any remaining frames
+        let (finalMelFrames, finalSamplesConsumed) = processor.processMelSpectrogram()
+        allMelFrames.append(contentsOf: finalMelFrames)
+        totalSamplesConsumed += finalSamplesConsumed
+
+        // Verify we got some frames
+        XCTAssertFalse(allMelFrames.isEmpty, "Should generate at least one frame")
+
+        // Check that all frames have the correct dimensions
+        for frame in allMelFrames {
+            XCTAssertEqual(frame.count, 40, "Each frame should have 40 mel bands")
+        }
+    }
+
+    func testStreamingLogMelSpectrogram() {
+        let processor = StreamingMelProcessor(
+            fftSize: 1024,
+            hopSize: 256,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Generate a test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 0.5
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        processor.addSamples(sineWave)
+
+        // Process log-mel spectrogram
+        let (logMelFrames, _) = processor.processLogMelSpectrogram()
+
+        XCTAssertFalse(logMelFrames.isEmpty, "Should generate log-mel frames")
+        XCTAssertEqual(logMelFrames[0].count, 40, "Each frame should have 40 mel bands")
+
+        // Check log-mel values
+        for frame in logMelFrames {
+            for value in frame {
+                XCTAssertFalse(value.isNaN, "Log-mel values should not be NaN")
+                XCTAssertFalse(value.isInfinite, "Log-mel values should not be infinite")
+                XCTAssertLessThanOrEqual(value, 0.0, "Log-mel values should be <= 0 dB")
+                XCTAssertGreaterThanOrEqual(value, -80.0, "Log-mel values should be >= -80 dB")
+            }
+        }
+    }
+
+    func testStreamingProcessorWithMinFrames() {
+        let processor = StreamingMelProcessor(
+            fftSize: 1024,
+            hopSize: 256,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Generate a test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 1.0
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        processor.addSamples(sineWave)
+
+        // Request only 5 frames
+        let minFrames = 5
+        let (melFrames, _) = processor.processMelSpectrogram(minFrames: minFrames)
+
+        // Verify we got the requested number of frames or fewer (if not enough samples)
+        XCTAssertLessThanOrEqual(
+            melFrames.count, minFrames, "Should generate at most the requested number of frames")
+        XCTAssertGreaterThan(melFrames.count, 0, "Should generate at least one frame")
+
+        // Process remaining frames
+        let (remainingFrames, _) = processor.processMelSpectrogram()
+
+        // Verify we got some remaining frames or none
+        XCTAssertGreaterThanOrEqual(
+            remainingFrames.count, 0, "Should have zero or more remaining frames")
+    }
+
+    func testPerformanceOfStreamingProcessor() {
+        let processor = StreamingMelProcessor(
+            fftSize: 1024,
+            hopSize: 256,
+            sampleRate: 44100.0,
+            melBands: 40,
+            minFrequency: 0.0,
+            maxFrequency: 8000.0
+        )
+
+        // Generate a large test signal
+        let sampleRate: Float = 44100.0
+        let duration: Float = 5.0  // 5 seconds
+        let sineWave = Utilities.generateSineWave(
+            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+
+        // Measure performance of processing in chunks
+        measure {
+            processor.reset()
+
+            // Process in chunks of 4096 samples (typical audio buffer size)
+            let chunkSize = 4096
+            for i in stride(from: 0, to: sineWave.count, by: chunkSize) {
+                let end = min(i + chunkSize, sineWave.count)
+                let chunk = Array(sineWave[i..<end])
+
+                processor.addSamples(chunk)
+                _ = processor.processLogMelSpectrogram()
+            }
+        }
+    }
 }
