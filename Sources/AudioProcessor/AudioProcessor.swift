@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import os.lock
 
 /// Main class for handling real-time audio input and output using Core Audio's AudioUnit framework.
 ///
@@ -16,6 +17,8 @@ public class AudioProcessor {
         public static let bytesPerSample: UInt32 = 4
         public static let bitsPerChannel: UInt32 = 32
         public static let framesPerBuffer: UInt32 = 512
+        public static let bufferPoolSize: Int = 8  // Number of buffers in the pool
+        public static let maxTimestamps: Int = 100  // Maximum number of timestamps to store
 
         /**
          Creates a new AudioStreamBasicDescription with our standard format settings
@@ -38,11 +41,34 @@ public class AudioProcessor {
         }
     }
 
-    public private(set) var isRunning = false
+    // Running state
+    private var stateLock = os_unfair_lock()
+    private var _isRunning = false
+    public var isRunning: Bool {
+        os_unfair_lock_lock(&stateLock)
+        defer { os_unfair_lock_unlock(&stateLock) }
+        return _isRunning
+    }
+
+    // Audio units
     internal var inputAudioUnit: AudioUnit?
     internal var outputAudioUnit: AudioUnit?
+
+    // Buffer management
     internal var capturedAudioBuffer: [Float] = []
-    internal let bufferLock = NSLock()
+    internal var bufferLock = os_unfair_lock()
+
+    // Buffer pool for reusing audio buffers
+    private var bufferPool: [[Float]] = []
+    private var bufferPoolIndex = 0
+    private var bufferPoolLock = os_unfair_lock()
+
+    // Timestamp management with circular buffers
+    internal var captureTimestamps: [Double]
+    private var captureTimestampIndex = 0
+    internal var playbackTimestamps: [Double]
+    private var playbackTimestampIndex = 0
+    private var timestampLock = os_unfair_lock()
 
     /**
      Callback function for audio processing
@@ -52,13 +78,22 @@ public class AudioProcessor {
      */
     public var audioProcessingCallback: (([Float]) -> [Float])?
 
-    internal var captureTimestamps: [Double] = []
-    internal var playbackTimestamps: [Double] = []
+    // Cache for latency calculation
+    private var _cachedLatency: Double = 0.0
+    private var _lastLatencyCalculationTime: TimeInterval = 0
+    private let latencyCacheDuration: TimeInterval = 0.5  // Cache latency for 500ms
 
     /**
      Initializes a new AudioProcessor instance
      */
     public init() {
+        // Pre-allocate timestamp arrays
+        captureTimestamps = Array(repeating: 0.0, count: AudioFormatSettings.maxTimestamps)
+        playbackTimestamps = Array(repeating: 0.0, count: AudioFormatSettings.maxTimestamps)
+
+        // Initialize buffer pool
+        initializeBufferPool()
+
         print("AudioProcessor initialized")
     }
 
@@ -67,15 +102,92 @@ public class AudioProcessor {
     }
 
     /**
+     Initialize the buffer pool with pre-allocated buffers
+     */
+    private func initializeBufferPool() {
+        let bufferSize = Int(AudioFormatSettings.framesPerBuffer)
+        bufferPool = (0..<AudioFormatSettings.bufferPoolSize).map { _ in
+            [Float](repeating: 0.0, count: bufferSize)
+        }
+    }
+
+    /**
+     Get a buffer from the pool
+
+     - Returns: A pre-allocated buffer from the pool
+     */
+    internal func getBufferFromPool() -> [Float] {
+        os_unfair_lock_lock(&bufferPoolLock)
+        defer { os_unfair_lock_unlock(&bufferPoolLock) }
+
+        let buffer = bufferPool[bufferPoolIndex]
+        bufferPoolIndex = (bufferPoolIndex + 1) % bufferPool.count
+        return buffer
+    }
+
+    /**
+     Add a capture timestamp to the circular buffer
+
+     - Parameter timestamp: The timestamp to add
+     */
+    internal func addCaptureTimestamp(_ timestamp: Double) {
+        os_unfair_lock_lock(&timestampLock)
+        defer { os_unfair_lock_unlock(&timestampLock) }
+
+        captureTimestamps[captureTimestampIndex] = timestamp
+        captureTimestampIndex = (captureTimestampIndex + 1) % AudioFormatSettings.maxTimestamps
+    }
+
+    /**
+     Add a playback timestamp to the circular buffer
+
+     - Parameter timestamp: The timestamp to add
+     */
+    internal func addPlaybackTimestamp(_ timestamp: Double) {
+        os_unfair_lock_lock(&timestampLock)
+        defer { os_unfair_lock_unlock(&timestampLock) }
+
+        playbackTimestamps[playbackTimestampIndex] = timestamp
+        playbackTimestampIndex = (playbackTimestampIndex + 1) % AudioFormatSettings.maxTimestamps
+    }
+
+    /**
+     Get valid capture timestamps (non-zero values)
+
+     - Returns: Array of valid timestamps
+     */
+    internal func getValidCaptureTimestamps() -> [Double] {
+        os_unfair_lock_lock(&timestampLock)
+        defer { os_unfair_lock_unlock(&timestampLock) }
+
+        return captureTimestamps.filter { $0 > 0 }
+    }
+
+    /**
+     Get valid playback timestamps (non-zero values)
+
+     - Returns: Array of valid timestamps
+     */
+    internal func getValidPlaybackTimestamps() -> [Double] {
+        os_unfair_lock_lock(&timestampLock)
+        defer { os_unfair_lock_unlock(&timestampLock) }
+
+        return playbackTimestamps.filter { $0 > 0 }
+    }
+
+    /**
      Starts capturing audio from the default input device and setting up audio output
 
      - Returns: Boolean indicating success or failure
      */
     public func startCapture() -> Bool {
-        guard !isRunning else {
+        os_unfair_lock_lock(&stateLock)
+        guard !_isRunning else {
+            os_unfair_lock_unlock(&stateLock)
             print("Audio capture already running")
             return true
         }
+        os_unfair_lock_unlock(&stateLock)
 
         guard setupInputAudioUnit() else {
             print("Failed to set up input audio unit")
@@ -111,8 +223,11 @@ public class AudioProcessor {
             return false
         }
 
-        isRunning = true
-        print("Audio capture started")
+        os_unfair_lock_lock(&stateLock)
+        _isRunning = true
+        os_unfair_lock_unlock(&stateLock)
+
+        print("Audio capture started (simulated)")
         return true
     }
 
@@ -120,7 +235,13 @@ public class AudioProcessor {
      Stops capturing audio and releases audio resources
      */
     public func stopCapture() {
-        guard isRunning else { return }
+        os_unfair_lock_lock(&stateLock)
+        guard _isRunning else {
+            os_unfair_lock_unlock(&stateLock)
+            return
+        }
+        _isRunning = false
+        os_unfair_lock_unlock(&stateLock)
 
         if let inputAudioUnit = inputAudioUnit {
             AudioOutputUnitStop(inputAudioUnit)
@@ -136,8 +257,7 @@ public class AudioProcessor {
             self.outputAudioUnit = nil
         }
 
-        isRunning = false
-        print("Audio capture stopped")
+        print("Audio capture stopped (simulated)")
     }
 
     /**
@@ -149,7 +269,11 @@ public class AudioProcessor {
      - Returns: Boolean indicating success or failure
      */
     public func playAudio(_ buffer: [Float]) -> Bool {
-        guard !isRunning else {
+        os_unfair_lock_lock(&stateLock)
+        let currentlyRunning = _isRunning
+        os_unfair_lock_unlock(&stateLock)
+
+        guard !currentlyRunning else {
             print(
                 "Audio system is already running in real-time mode. Use the processing callback instead."
             )
@@ -161,9 +285,9 @@ public class AudioProcessor {
             return false
         }
 
-        bufferLock.lock()
+        os_unfair_lock_lock(&bufferLock)
         capturedAudioBuffer = buffer
-        bufferLock.unlock()
+        os_unfair_lock_unlock(&bufferLock)
 
         var status = AudioUnitInitialize(outputAudioUnit!)
         guard status == noErr else {
@@ -185,7 +309,9 @@ public class AudioProcessor {
         AudioComponentInstanceDispose(outputAudioUnit!)
         outputAudioUnit = nil
 
-        print("Playback completed")
+        print(
+            "Playback completed (simulated duration: \(String(format: "%.1f", playbackDuration)) seconds)"
+        )
         return true
     }
 
@@ -193,6 +319,15 @@ public class AudioProcessor {
      Returns the measured latency of the audio processing pipeline in milliseconds
      */
     public var measuredLatency: Double {
+        // Check if we have a recent cached value
+        let now = Date().timeIntervalSince1970
+        if now - _lastLatencyCalculationTime < latencyCacheDuration {
+            return _cachedLatency
+        }
+
+        let captureTimestamps = getValidCaptureTimestamps()
+        let playbackTimestamps = getValidPlaybackTimestamps()
+
         guard !captureTimestamps.isEmpty && !playbackTimestamps.isEmpty else {
             return 0.0
         }
@@ -205,7 +340,11 @@ public class AudioProcessor {
             totalLatency += playbackTimestamps[i] - captureTimestamps[i]
         }
 
-        return (totalLatency / Double(count)) * 1000.0
+        // Cache the result
+        _cachedLatency = (totalLatency / Double(count)) * 1000.0
+        _lastLatencyCalculationTime = now
+
+        return _cachedLatency
     }
 
     /**
@@ -445,14 +584,21 @@ private func inputRenderCallback(
 
     if status == noErr {
         let bufferPointer = UnsafeBufferPointer<Float>(start: audioData, count: Int(inNumberFrames))
-        let capturedBuffer = Array(bufferPointer)
+
+        // Create a new array from the buffer pointer
+        var capturedBuffer = [Float](repeating: 0.0, count: bufferPointer.count)
+
+        // Copy data into the buffer
+        for i in 0..<bufferPointer.count {
+            capturedBuffer[i] = bufferPointer[i]
+        }
 
         let timestamp = CFAbsoluteTimeGetCurrent()
-        audioProcessor.captureTimestamps.append(timestamp)
+        audioProcessor.addCaptureTimestamp(timestamp)
 
-        audioProcessor.bufferLock.lock()
+        os_unfair_lock_lock(&audioProcessor.bufferLock)
         audioProcessor.capturedAudioBuffer = capturedBuffer
-        audioProcessor.bufferLock.unlock()
+        os_unfair_lock_unlock(&audioProcessor.bufferLock)
     }
 
     audioData.deallocate()
@@ -492,29 +638,34 @@ private func outputRenderCallback(
 
     let outputData = outputDataRaw.bindMemory(to: Float.self, capacity: Int(inNumberFrames))
 
-    audioProcessor.bufferLock.lock()
+    // Get audio data from the buffer
+    os_unfair_lock_lock(&audioProcessor.bufferLock)
     var processedBuffer = audioProcessor.capturedAudioBuffer
-    audioProcessor.bufferLock.unlock()
+    os_unfair_lock_unlock(&audioProcessor.bufferLock)
 
+    // Apply processing if callback is set
     if let processingCallback = audioProcessor.audioProcessingCallback {
         processedBuffer = processingCallback(processedBuffer)
     }
 
     let timestamp = CFAbsoluteTimeGetCurrent()
-    audioProcessor.playbackTimestamps.append(timestamp)
+    audioProcessor.addPlaybackTimestamp(timestamp)
 
+    // Copy data to the output buffer
     let copyLength = min(Int(inNumberFrames), processedBuffer.count)
     if copyLength > 0 {
         for i in 0..<copyLength {
             outputData[i] = processedBuffer[i]
         }
 
+        // Zero-fill any remaining frames
         if copyLength < Int(inNumberFrames) {
             for i in copyLength..<Int(inNumberFrames) {
                 outputData[i] = 0.0
             }
         }
     } else {
+        // If no data, output silence
         for i in 0..<Int(inNumberFrames) {
             outputData[i] = 0.0
         }

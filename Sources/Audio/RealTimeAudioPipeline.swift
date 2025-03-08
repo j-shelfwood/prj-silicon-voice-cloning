@@ -38,13 +38,13 @@ public class RealTimeAudioPipeline {
     private let config: Configuration
 
     // Thread safety for running state
-    private let stateLock = os_unfair_lock_t.allocate(capacity: 1)
+    private var stateLock = os_unfair_lock()
     private var _isRunning = false
 
     // Buffer pool for audio processing to reduce allocations
     private var bufferPool: [[Float]] = []
     private var bufferPoolIndex = 0
-    private let bufferPoolLock = os_unfair_lock_t.allocate(capacity: 1)
+    private var bufferPoolLock = os_unfair_lock()
 
     // Lazily initialize the input processor
     private var inputProcessor: AudioInputProcessor {
@@ -81,8 +81,8 @@ public class RealTimeAudioPipeline {
 
     /// Flag indicating if the pipeline is running
     public var isRunning: Bool {
-        os_unfair_lock_lock(stateLock)
-        defer { os_unfair_lock_unlock(stateLock) }
+        os_unfair_lock_lock(&stateLock)
+        defer { os_unfair_lock_unlock(&stateLock) }
 
         // Only check processors if we think we're running
         if !_isRunning {
@@ -108,16 +108,10 @@ public class RealTimeAudioPipeline {
         self.config = configuration
         // Initialize the buffer pool
         initializeBufferPool()
-
-        // Initialize locks
-        os_unfair_lock_init(stateLock)
-        os_unfair_lock_init(bufferPoolLock)
     }
 
     deinit {
         stop()
-        stateLock.deallocate()
-        bufferPoolLock.deallocate()
     }
 
     /// Initialize the buffer pool with pre-allocated buffers
@@ -130,8 +124,8 @@ public class RealTimeAudioPipeline {
 
     /// Get a buffer from the pool
     private func getBufferFromPool() -> [Float] {
-        os_unfair_lock_lock(bufferPoolLock)
-        defer { os_unfair_lock_unlock(bufferPoolLock) }
+        os_unfair_lock_lock(&bufferPoolLock)
+        defer { os_unfair_lock_unlock(&bufferPoolLock) }
 
         let buffer = bufferPool[bufferPoolIndex]
         bufferPoolIndex = (bufferPoolIndex + 1) % bufferPool.count
@@ -206,9 +200,9 @@ public class RealTimeAudioPipeline {
         }
 
         // Update running state
-        os_unfair_lock_lock(stateLock)
+        os_unfair_lock_lock(&stateLock)
         _isRunning = true
-        os_unfair_lock_unlock(stateLock)
+        os_unfair_lock_unlock(&stateLock)
 
         print("Real-time audio pipeline started")
         return true
@@ -217,9 +211,9 @@ public class RealTimeAudioPipeline {
     /// Stops the real-time audio pipeline
     public func stop() {
         // Update running state first
-        os_unfair_lock_lock(stateLock)
+        os_unfair_lock_lock(&stateLock)
         _isRunning = false
-        os_unfair_lock_unlock(stateLock)
+        os_unfair_lock_unlock(&stateLock)
 
         // Only stop if processors were initialized
         _inputProcessor?.stop()
