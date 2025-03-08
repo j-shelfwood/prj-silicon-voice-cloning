@@ -6,12 +6,16 @@ import os.lock
 /// A class for generating spectrograms from audio signals using FFT analysis.
 /// This class handles the conversion of time-domain audio signals into
 /// time-frequency representations (spectrograms).
-public class SpectrogramGenerator {
+public class SpectrogramGenerator: @unchecked Sendable {
     private let fftProcessor: FFTProcessor
     private let defaultHopSize: Int
 
     // Pre-allocated buffer for frame extraction
     private var frameBuffer: [Float]
+
+    // Pre-allocated buffer for frame extraction optimization
+    private var extractionBuffer: UnsafeMutablePointer<Float>?
+    private var extractionBufferSize: Int = 0
 
     // Buffer pool for parallel processing
     private var bufferPool: [[Float]] = []
@@ -36,8 +40,20 @@ public class SpectrogramGenerator {
         self.defaultHopSize = hopSize ?? fftSize / 4
         self.frameBuffer = [Float](repeating: 0.0, count: fftSize)
 
+        // Initialize extraction buffer
+        self.extractionBuffer = UnsafeMutablePointer<Float>.allocate(capacity: fftSize)
+        self.extractionBufferSize = fftSize
+
         // Initialize buffer pool
         initializeBufferPool(fftSize: fftSize)
+    }
+
+    deinit {
+        // Free the extraction buffer
+        if let buffer = extractionBuffer {
+            buffer.deallocate()
+            extractionBuffer = nil
+        }
     }
 
     /**
@@ -135,45 +151,62 @@ public class SpectrogramGenerator {
         var spectrogram = [[Float]](
             repeating: [Float](repeating: 0.0, count: fftSize / 2), count: numFrames)
 
-        // Process each frame
-        for i in 0..<numFrames {
-            let startIdx = i * hopSize
-            let endIdx = min(startIdx + fftSize, inputBuffer.count)
+        // Ensure extraction buffer is large enough
+        if extractionBufferSize < fftSize {
+            if let buffer = extractionBuffer {
+                buffer.deallocate()
+            }
+            extractionBuffer = UnsafeMutablePointer<Float>.allocate(capacity: fftSize)
+            extractionBufferSize = fftSize
+        }
 
-            if endIdx - startIdx == fftSize {
-                // Fast path: direct slice without copying
-                // Use withUnsafeBufferPointer for better performance
-                let frame = inputBuffer.withUnsafeBufferPointer { bufferPtr in
-                    return Array(
-                        UnsafeBufferPointer(
-                            start: bufferPtr.baseAddress!.advanced(by: startIdx),
-                            count: fftSize))
-                }
-                spectrogram[i] = fftProcessor.performFFT(inputBuffer: frame)
-            } else {
-                // Partial frame: reset buffer, copy available samples, and zero-pad
-                // Clear the buffer using vDSP for better performance
-                var zero: Float = 0.0
-                vDSP_vfill(&zero, &frameBuffer, 1, vDSP_Length(fftSize))
+        // Process each frame using optimized extraction
+        inputBuffer.withUnsafeBufferPointer { inputPtr in
+            guard let inputBaseAddress = inputPtr.baseAddress else { return }
 
+            for i in 0..<numFrames {
+                let startIdx = i * hopSize
+                let endIdx = min(startIdx + fftSize, inputBuffer.count)
                 let availableSamples = endIdx - startIdx
-                if availableSamples > 0 {
-                    // Copy available samples using vDSP for better performance
-                    inputBuffer.withUnsafeBufferPointer { bufferPtr in
-                        frameBuffer.withUnsafeMutableBufferPointer { framePtr in
-                            vDSP_mmov(
-                                bufferPtr.baseAddress!.advanced(by: startIdx),
-                                framePtr.baseAddress!,
-                                vDSP_Length(availableSamples),
-                                1,
-                                vDSP_Length(availableSamples),
-                                vDSP_Length(fftSize)
-                            )
-                        }
-                    }
-                }
 
-                spectrogram[i] = fftProcessor.performFFT(inputBuffer: frameBuffer)
+                if availableSamples == fftSize {
+                    // Fast path: direct extraction without intermediate array allocation
+                    // Extract frame directly to a temporary array using vDSP_mmov
+                    vDSP_mmov(
+                        inputBaseAddress.advanced(by: startIdx),
+                        extractionBuffer!,
+                        vDSP_Length(fftSize),
+                        1,
+                        vDSP_Length(fftSize),
+                        vDSP_Length(1)
+                    )
+
+                    // Create a temporary array from the buffer for FFT processing
+                    // This avoids unsafe memory access in the FFT processor
+                    let frame = Array(UnsafeBufferPointer(start: extractionBuffer, count: fftSize))
+                    spectrogram[i] = fftProcessor.performFFT(inputBuffer: frame)
+                } else {
+                    // Partial frame: clear buffer and copy available samples
+                    // Clear the buffer using vDSP for better performance
+                    var zero: Float = 0.0
+                    vDSP_vfill(&zero, extractionBuffer!, 1, vDSP_Length(fftSize))
+
+                    if availableSamples > 0 {
+                        // Copy available samples using vDSP for better performance
+                        vDSP_mmov(
+                            inputBaseAddress.advanced(by: startIdx),
+                            extractionBuffer!,
+                            vDSP_Length(availableSamples),
+                            1,
+                            vDSP_Length(availableSamples),
+                            vDSP_Length(1)
+                        )
+                    }
+
+                    // Create a temporary array from the buffer for FFT processing
+                    let frame = Array(UnsafeBufferPointer(start: extractionBuffer, count: fftSize))
+                    spectrogram[i] = fftProcessor.performFFT(inputBuffer: frame)
+                }
             }
         }
 
@@ -231,67 +264,71 @@ public class SpectrogramGenerator {
         let group = DispatchGroup()
 
         // Create a lock for thread-safe access to the spectrogram array
-        var lock = os_unfair_lock()
+        var spectrogramLock = os_unfair_lock_s()
 
-        // Determine optimal batch size based on number of frames
-        let batchSize = max(1, min(4, numFrames / 8))
+        // Determine optimal batch size based on number of frames and available cores
+        let processorCount = ProcessInfo.processInfo.activeProcessorCount
+        let batchSize = max(1, min(numFrames / processorCount, 8))
         let batches = (numFrames + batchSize - 1) / batchSize
+
+        // Create a copy of the input buffer to avoid Sendable warnings
+        let inputCopy = Array(inputBuffer)
 
         // Process frames in parallel batches
         for batchIndex in 0..<batches {
-            queue.async(group: group) {
+            queue.async(group: group) { [self] in
                 let startFrame = batchIndex * batchSize
                 let endFrame = min(startFrame + batchSize, numFrames)
 
+                // Allocate a local extraction buffer for this thread
+                let localBuffer = UnsafeMutablePointer<Float>.allocate(capacity: fftSize)
+                defer { localBuffer.deallocate() }
+
+                // Create a local array for processing
+                var localResults = [[Float]](repeating: [], count: endFrame - startFrame)
+                var localIndex = 0
+
                 for i in startFrame..<endFrame {
                     let startIdx = i * hopSize
-                    let endIdx = min(startIdx + fftSize, inputBuffer.count)
+                    let endIdx = min(startIdx + fftSize, inputCopy.count)
+                    let availableSamples = endIdx - startIdx
 
-                    var frameResult: [Float]
+                    // Clear the buffer using vDSP
+                    var zero: Float = 0.0
+                    vDSP_vfill(&zero, localBuffer, 1, vDSP_Length(fftSize))
 
-                    if endIdx - startIdx == fftSize {
-                        // Fast path: direct slice without copying
-                        // Use withUnsafeBufferPointer for better performance
-                        let frame = inputBuffer.withUnsafeBufferPointer { bufferPtr in
-                            return Array(
-                                UnsafeBufferPointer(
-                                    start: bufferPtr.baseAddress!.advanced(by: startIdx),
-                                    count: fftSize))
+                    if availableSamples > 0 {
+                        // Copy available samples using vDSP - using the copied input buffer
+                        inputCopy.withUnsafeBufferPointer { bufferPtr in
+                            guard let inputBaseAddress = bufferPtr.baseAddress else { return }
+                            vDSP_mmov(
+                                inputBaseAddress.advanced(by: startIdx),
+                                localBuffer,
+                                vDSP_Length(availableSamples),
+                                1,
+                                vDSP_Length(availableSamples),
+                                vDSP_Length(1)
+                            )
                         }
-                        frameResult = self.fftProcessor.performFFT(inputBuffer: frame)
-                    } else {
-                        // Partial frame: get a buffer from the pool
-                        var localFrameBuffer = self.getBufferFromPool()
-
-                        // Clear the buffer using vDSP
-                        var zero: Float = 0.0
-                        vDSP_vfill(&zero, &localFrameBuffer, 1, vDSP_Length(fftSize))
-
-                        let availableSamples = endIdx - startIdx
-                        if availableSamples > 0 {
-                            // Copy available samples using vDSP
-                            inputBuffer.withUnsafeBufferPointer { bufferPtr in
-                                localFrameBuffer.withUnsafeMutableBufferPointer { framePtr in
-                                    vDSP_mmov(
-                                        bufferPtr.baseAddress!.advanced(by: startIdx),
-                                        framePtr.baseAddress!,
-                                        vDSP_Length(availableSamples),
-                                        1,
-                                        vDSP_Length(availableSamples),
-                                        vDSP_Length(fftSize)
-                                    )
-                                }
-                            }
-                        }
-
-                        frameResult = self.fftProcessor.performFFT(inputBuffer: localFrameBuffer)
                     }
 
-                    // Thread-safe update of the spectrogram array
-                    os_unfair_lock_lock(&lock)
-                    spectrogram[i] = frameResult
-                    os_unfair_lock_unlock(&lock)
+                    // Create a temporary array from the buffer for FFT processing
+                    let frame = Array(UnsafeBufferPointer(start: localBuffer, count: fftSize))
+                    let frameResult = self.fftProcessor.performFFT(inputBuffer: frame)
+
+                    // Store in local results array
+                    localResults[localIndex] = frameResult
+                    localIndex += 1
                 }
+
+                // Thread-safe update of the spectrogram array - only lock once per batch
+                os_unfair_lock_lock(&spectrogramLock)
+                for (offset, result) in localResults.enumerated() {
+                    if !result.isEmpty {
+                        spectrogram[startFrame + offset] = result
+                    }
+                }
+                os_unfair_lock_unlock(&spectrogramLock)
             }
         }
 

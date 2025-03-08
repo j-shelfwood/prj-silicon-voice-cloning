@@ -112,9 +112,13 @@ public class FFTProcessor {
         }
 
         // Create a copy of the input buffer to avoid modifying the original
-        var inputCopy = Array(inputBuffer.prefix(fftSize))
+        var inputCopy = [Float](repeating: 0.0, count: fftSize)
 
-        // Apply window function to reduce spectral leakage
+        // Copy input data using vDSP_mmov for better performance
+        let copyLength = min(fftSize, inputBuffer.count)
+        vDSP_mmov(inputBuffer, &inputCopy, vDSP_Length(copyLength), 1, vDSP_Length(copyLength), 1)
+
+        // Apply window function to reduce spectral leakage using vDSP_vmul
         vDSP_vmul(inputCopy, 1, windowBuffer, 1, &inputCopy, 1, vDSP_Length(fftSize))
 
         // Prepare split complex buffer for FFT
@@ -148,36 +152,38 @@ public class FFTProcessor {
 
                 // Perform forward FFT
                 guard let fftSetup = fftSetup else {
-                    // Use LoggerUtility.debug instead of print
                     LoggerUtility.debug("Error: FFT setup not initialized")
                     return []
                 }
 
-                // Use the FFT setup to perform the forward transform
                 fftSetup.forward(input: splitComplex, output: &splitComplex)
 
-                // Calculate magnitude spectrum
+                // Calculate magnitude spectrum using vDSP_zvmags
                 vDSP_zvmags(&splitComplex, 1, &localMagnitudeBuffer, 1, vDSP_Length(halfSize))
 
-                // Scale magnitudes
-                var scaleFactor = Float(1.0) / Float(fftSize)
+                // Convert to dB scale with proper scaling
+                // Scale factor for FFT: 2.0 / fftSize
+                var scaleFactor = 2.0 / Float(fftSize)
                 vDSP_vsmul(
                     localMagnitudeBuffer, 1, &scaleFactor, &localMagnitudeBuffer, 1,
                     vDSP_Length(halfSize))
 
-                // Convert to dB scale
-                var zeroReference: Float = 1.0
-                vDSP_vdbcon(
-                    localMagnitudeBuffer, 1, &zeroReference, &localDbMagnitudeBuffer, 1,
-                    vDSP_Length(halfSize), 1)
+                // Add small value to avoid log(0)
+                var epsilon: Float = 1e-10
+                vDSP_vsadd(
+                    localMagnitudeBuffer, 1, &epsilon, &localMagnitudeBuffer, 1,
+                    vDSP_Length(halfSize))
 
-                // Create a copy of the result to return
-                let result = Array(localDbMagnitudeBuffer)
+                // Convert to dB: 10 * log10(x)
+                var ten: Float = 10.0
+                vDSP_vdbcon(
+                    localMagnitudeBuffer, 1, &ten, &localDbMagnitudeBuffer, 1,
+                    vDSP_Length(halfSize), 0)
 
                 // Cache the result
-                cacheResult(key: key, result: result)
+                cacheResult(key: key, result: Array(localDbMagnitudeBuffer))
 
-                return result
+                return Array(localDbMagnitudeBuffer)
             }
         }
     }

@@ -5,7 +5,7 @@ import os.lock
 
 /// A class for processing audio in real-time chunks to produce mel-spectrograms.
 /// This is optimized for streaming use cases where audio arrives in small buffers.
-public class StreamingMelProcessor {
+public class StreamingMelProcessor: @unchecked Sendable {
     // Configuration parameters
     private let fftSize: Int
     private let hopSize: Int
@@ -18,6 +18,9 @@ public class StreamingMelProcessor {
     private let fftProcessor: FFTProcessor
     private let melConverter: MelSpectrogramConverter
 
+    // Pre-allocated frame buffer for extraction
+    private var frameBuffer: UnsafeMutablePointer<Float>
+
     // Audio buffer
     private var audioBuffer: [Float] = []
     private var bufferLock = os_unfair_lock()
@@ -26,6 +29,9 @@ public class StreamingMelProcessor {
     private var melCache: [String: [[Float]]] = [:]
     private var logMelCache: [String: [[Float]]] = [:]
     private var cacheLock = os_unfair_lock()
+
+    // Pre-allocated spectrogram buffer for batch processing
+    private var spectrogramBuffer: [[Float]] = []
 
     // Maximum buffer size to prevent memory issues
     private let maxBufferSize = 1_000_000  // ~23 seconds at 44.1kHz
@@ -63,6 +69,14 @@ public class StreamingMelProcessor {
             minFrequency: minFrequency,
             maxFrequency: maxFrequency
         )
+
+        // Allocate frame buffer
+        self.frameBuffer = UnsafeMutablePointer<Float>.allocate(capacity: fftSize)
+    }
+
+    deinit {
+        // Free the frame buffer
+        frameBuffer.deallocate()
     }
 
     /**
@@ -74,6 +88,11 @@ public class StreamingMelProcessor {
         os_unfair_lock_lock(&bufferLock)
         defer { os_unfair_lock_unlock(&bufferLock) }
 
+        // Reserve capacity to avoid multiple reallocations
+        if audioBuffer.capacity < audioBuffer.count + samples.count {
+            audioBuffer.reserveCapacity(audioBuffer.count + samples.count)
+        }
+
         audioBuffer.append(contentsOf: samples)
 
         // Trim buffer if it gets too large
@@ -83,8 +102,8 @@ public class StreamingMelProcessor {
 
         // Clear caches when new samples are added
         os_unfair_lock_lock(&cacheLock)
-        melCache.removeAll()
-        logMelCache.removeAll()
+        melCache.removeAll(keepingCapacity: true)
+        logMelCache.removeAll(keepingCapacity: true)
         os_unfair_lock_unlock(&cacheLock)
     }
 
@@ -126,22 +145,44 @@ public class StreamingMelProcessor {
             return []
         }
 
-        // Process frames
-        var spectrogram: [[Float]] = []
+        // Pre-allocate or resize the spectrogram buffer if needed
+        if spectrogramBuffer.count < frameCount {
+            spectrogramBuffer = [[Float]](
+                repeating: [Float](repeating: 0.0, count: fftSize / 2),
+                count: frameCount
+            )
+        }
 
-        for i in 0..<frameCount {
-            let startIdx = buffer.count - samplesNeeded + i * hopSize
-            let endIdx = startIdx + fftSize
+        // Process frames using optimized extraction
+        buffer.withUnsafeBufferPointer { bufferPtr in
+            guard let baseAddress = bufferPtr.baseAddress else { return }
 
-            if startIdx >= 0 && endIdx <= buffer.count {
-                let frame = Array(buffer[startIdx..<endIdx])
-                let spectrum = fftProcessor.performFFT(inputBuffer: frame)
-                spectrogram.append(spectrum)
+            for i in 0..<frameCount {
+                let startIdx = buffer.count - samplesNeeded + i * hopSize
+
+                // Clear the frame buffer
+                var zero: Float = 0.0
+                vDSP_vfill(&zero, frameBuffer, 1, vDSP_Length(fftSize))
+
+                // Copy frame data using vDSP
+                vDSP_mmov(
+                    baseAddress.advanced(by: startIdx),
+                    frameBuffer,
+                    vDSP_Length(fftSize),
+                    1,
+                    vDSP_Length(fftSize),
+                    vDSP_Length(1)
+                )
+
+                // Create a temporary array from the buffer for FFT processing
+                let frame = Array(UnsafeBufferPointer(start: frameBuffer, count: fftSize))
+                spectrogramBuffer[i] = fftProcessor.performFFT(inputBuffer: frame)
             }
         }
 
-        // Convert to mel spectrogram
-        let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
+        // Convert to mel spectrogram using batch processing
+        let melSpectrogram = melConverter.specToMelSpec(
+            spectrogram: spectrogramBuffer[0..<frameCount].map { $0 })
 
         // Cache the result
         os_unfair_lock_lock(&cacheLock)
@@ -268,12 +309,12 @@ public class StreamingMelProcessor {
      */
     public func reset() {
         os_unfair_lock_lock(&bufferLock)
-        audioBuffer.removeAll()
+        audioBuffer.removeAll(keepingCapacity: true)
         os_unfair_lock_unlock(&bufferLock)
 
         os_unfair_lock_lock(&cacheLock)
-        melCache.removeAll()
-        logMelCache.removeAll()
+        melCache.removeAll(keepingCapacity: true)
+        logMelCache.removeAll(keepingCapacity: true)
         os_unfair_lock_unlock(&cacheLock)
     }
 

@@ -230,23 +230,66 @@ public class MelSpectrogramConverter {
             return []
         }
 
-        // Pre-allocate the log-mel spectrogram
+        // Check cache first
+        let cacheKey = self.cacheKey(
+            spectrogram: melSpectrogram, operation: "logmel_\(ref)_\(floor)_\(minDb)_\(maxDb)")
+        if let cached = getCachedResult(key: cacheKey) {
+            return cached
+        }
+
+        // Get dimensions
         let numFrames = melSpectrogram.count
         let numBands = melSpectrogram[0].count
-        var logMelSpectrogram = [[Float]](
-            repeating: [Float](repeating: 0.0, count: numBands), count: numFrames)
+        let totalElements = numFrames * numBands
 
-        // Convert to log scale
+        // Flatten the mel spectrogram for vectorized operations
+        var flatMel = [Float](repeating: 0.0, count: totalElements)
+        var flatLogMel = [Float](repeating: 0.0, count: totalElements)
+
+        // Copy data to flat array
         for i in 0..<numFrames {
+            let rowOffset = i * numBands
             for j in 0..<numBands {
-                // Ensure value is at least floor
-                let value = max(melSpectrogram[i][j], floor)
-                // Convert to log scale: 10 * log10(value / ref)
-                let logValue = 10.0 * log10(value / ref)
-                // Clamp to the specified dB range
-                logMelSpectrogram[i][j] = min(maxDb, max(minDb, logValue))
+                flatMel[rowOffset + j] = melSpectrogram[i][j]
             }
         }
+
+        // Create mutable copies of the constants for vDSP functions
+        var floorValue = floor
+        var refValue = ref
+        var minDbValue = minDb
+        var maxDbValue = maxDb
+
+        // Apply floor (threshold) using vDSP_vthres
+        vDSP_vthres(flatMel, 1, &floorValue, &flatMel, 1, vDSP_Length(totalElements))
+
+        // Divide by reference value using vDSP_vsdiv
+        vDSP_vsdiv(flatMel, 1, &refValue, &flatMel, 1, vDSP_Length(totalElements))
+
+        // Compute log10 using vForce
+        var count = Int32(totalElements)
+        vvlog10f(&flatLogMel, flatMel, &count)
+
+        // Multiply by 10.0 using vDSP_vsmul
+        var ten: Float = 10.0
+        vDSP_vsmul(flatLogMel, 1, &ten, &flatLogMel, 1, vDSP_Length(totalElements))
+
+        // Clip to range [minDb, maxDb] using vDSP_vclip
+        vDSP_vclip(
+            flatLogMel, 1, &minDbValue, &maxDbValue, &flatLogMel, 1, vDSP_Length(totalElements))
+
+        // Reshape back to 2D array
+        var logMelSpectrogram = [[Float]](
+            repeating: [Float](repeating: 0.0, count: numBands), count: numFrames)
+        for i in 0..<numFrames {
+            let rowOffset = i * numBands
+            for j in 0..<numBands {
+                logMelSpectrogram[i][j] = flatLogMel[rowOffset + j]
+            }
+        }
+
+        // Cache the result
+        cacheResult(key: cacheKey, result: logMelSpectrogram)
 
         return logMelSpectrogram
     }
