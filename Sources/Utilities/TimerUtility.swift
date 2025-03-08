@@ -32,25 +32,19 @@ public class TimerUtility {
      - Parameter id: Identifier of the timer to end
      - Returns: Elapsed time in milliseconds
      */
+    @MainActor
     public static func endTimer(id: String) -> Double {
         os_unfair_lock_lock(&timerLock)
         defer { os_unfair_lock_unlock(&timerLock) }
 
         guard let startTime = timers[id] else {
-            print("Warning: Timer with ID '\(id)' doesn't exist")
-            return 0
+            LoggerUtility.debug("Warning: Timer with ID '\(id)' doesn't exist")
+            return 0.0
         }
 
         let endTime = CFAbsoluteTimeGetCurrent()
-        let elapsedTime = (endTime - startTime) * 1000
-
-        // Cache the result
-        timerCache[id] = elapsedTime
-        cacheTimestamps[id] = endTime
-
-        // Remove the timer
+        let elapsedTime = (endTime - startTime) * 1000.0  // Convert to milliseconds
         timers.removeValue(forKey: id)
-
         return elapsedTime
     }
 

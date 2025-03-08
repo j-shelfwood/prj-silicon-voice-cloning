@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import Utilities
 import os.lock
 
 /// Manages audio output playback to the speakers using Core Audio's AudioUnit framework.
@@ -132,7 +133,7 @@ public class AudioOutputProcessor {
         os_unfair_lock_lock(&stateLock)
         guard !_isRunning else {
             os_unfair_lock_unlock(&stateLock)
-            print("Audio output already running")
+            LoggerUtility.debug("Audio output already running")
             return true
         }
         os_unfair_lock_unlock(&stateLock)
@@ -157,17 +158,17 @@ public class AudioOutputProcessor {
         )
 
         guard audioUnitManager?.setup(renderCallback: outputCallbackStruct) == true else {
-            print("Failed to set up output audio unit")
+            LoggerUtility.debug("Failed to set up output audio unit")
             return false
         }
 
         guard audioUnitManager?.initialize() == true else {
-            print("Failed to initialize output audio unit")
+            LoggerUtility.debug("Failed to initialize output audio unit")
             return false
         }
 
         guard audioUnitManager?.start() == true else {
-            print("Failed to start output audio unit")
+            LoggerUtility.debug("Failed to start output audio unit")
             return false
         }
 
@@ -175,7 +176,7 @@ public class AudioOutputProcessor {
         _isRunning = true
         os_unfair_lock_unlock(&stateLock)
 
-        print("Audio output started")
+        LoggerUtility.debug("Audio output started")
         return true
     }
 
@@ -193,7 +194,7 @@ public class AudioOutputProcessor {
         audioUnitManager?.dispose()
         audioUnitManager = nil
 
-        print("Audio output stopped")
+        LoggerUtility.debug("Audio output stopped")
     }
 
     /// Plays a buffer of audio samples through the output device
@@ -205,8 +206,9 @@ public class AudioOutputProcessor {
         os_unfair_lock_unlock(&stateLock)
 
         guard !currentlyRunning else {
-            print(
-                "Audio output is already running in real-time mode. Use the data provider instead.")
+            LoggerUtility.debug(
+                "Audio output is already running in real-time mode. Use the data provider instead."
+            )
             return false
         }
 
@@ -223,7 +225,7 @@ public class AudioOutputProcessor {
             // Stop after playback
             stop()
 
-            print(
+            LoggerUtility.debug(
                 "Playback completed (simulated duration: \(String(format: "%.1f", playbackDuration)) seconds)"
             )
             return true

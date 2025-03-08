@@ -98,8 +98,8 @@ public class FFTProcessor {
     public func performFFT(inputBuffer: [Float]) -> [Float] {
         // Ensure input buffer is large enough
         guard inputBuffer.count >= fftSize else {
-            // Use print instead of Utilities.log to avoid MainActor requirement
-            print(
+            // Use LoggerUtility.debug instead of print
+            LoggerUtility.debug(
                 "Error: Input buffer too small for FFT. Expected at least \(fftSize) samples, got \(inputBuffer.count)."
             )
             return []
@@ -148,8 +148,8 @@ public class FFTProcessor {
 
                 // Perform forward FFT
                 guard let fftSetup = fftSetup else {
-                    // Use print instead of Utilities.log to avoid MainActor requirement
-                    print("Error: FFT setup not initialized")
+                    // Use LoggerUtility.debug instead of print
+                    LoggerUtility.debug("Error: FFT setup not initialized")
                     return []
                 }
 

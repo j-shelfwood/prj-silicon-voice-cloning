@@ -1,3 +1,4 @@
+import AVFoundation
 import AudioProcessor
 import DSP
 import Foundation
@@ -99,16 +100,77 @@ class Benchmark {
     }
 }
 
+/// Load audio samples from an m4a file
+func loadAudioFromFile(filePath: String) -> [Float]? {
+    let url: URL
+
+    // Handle both URL strings and file paths
+    if filePath.hasPrefix("http://") || filePath.hasPrefix("https://") {
+        guard let httpUrl = URL(string: filePath) else {
+            print("Error: Invalid URL: \(filePath)")
+            return nil
+        }
+        url = httpUrl
+    } else {
+        url = URL(fileURLWithPath: filePath)
+    }
+
+    do {
+        let audioFile = try AVAudioFile(forReading: url)
+        let format = audioFile.processingFormat
+        let frameCount = UInt32(audioFile.length)
+
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+            print("Error: Failed to create audio buffer")
+            return nil
+        }
+
+        try audioFile.read(into: buffer)
+
+        // Convert to mono if needed
+        if let floatChannelData = buffer.floatChannelData {
+            let channelCount = Int(format.channelCount)
+            let frameLength = Int(buffer.frameLength)
+
+            if channelCount == 1 {
+                // Already mono
+                return Array(UnsafeBufferPointer(start: floatChannelData[0], count: frameLength))
+            } else {
+                // Convert to mono by averaging channels
+                var monoSamples = [Float](repeating: 0.0, count: frameLength)
+
+                for frame in 0..<frameLength {
+                    var sum: Float = 0.0
+                    for channel in 0..<channelCount {
+                        sum += floatChannelData[channel][frame]
+                    }
+                    monoSamples[frame] = sum / Float(channelCount)
+                }
+
+                return monoSamples
+            }
+        }
+
+        print("Error: Failed to get float channel data")
+        return nil
+    } catch {
+        print("Error loading audio file: \(error)")
+        return nil
+    }
+}
+
 /// Benchmark configuration
 struct BenchmarkConfig {
     let iterations: Int
     let warmupIterations: Int
-    let audioLength: Float  // in seconds
+    let audioFilePath: String
+    let audioLength: Float  // in seconds, used only if audioFilePath is empty
     let fftSize: Int
     let hopSize: Int
     let melBands: Int
     let sampleRate: Float
     let runCategory: BenchmarkCategory
+    let maxAudioDuration: Float  // maximum duration to use from audio file (in seconds)
 
     enum BenchmarkCategory: String, CaseIterable {
         case all = "all"
@@ -121,12 +183,14 @@ struct BenchmarkConfig {
     static let standard = BenchmarkConfig(
         iterations: 10,
         warmupIterations: 3,
+        audioFilePath: "Assets/iroh-short.m4a",
         audioLength: 5.0,
         fftSize: 1024,
         hopSize: 256,
         melBands: 80,
         sampleRate: 44100.0,
-        runCategory: .all
+        runCategory: .all,
+        maxAudioDuration: 2.0  // Use only 2 seconds of audio for benchmarks
     )
 
     static func fromCommandLine() -> BenchmarkConfig {
@@ -134,12 +198,14 @@ struct BenchmarkConfig {
 
         var iterations = standard.iterations
         var warmup = standard.warmupIterations
+        var audioFilePath = standard.audioFilePath
         var audioLength = standard.audioLength
         var fftSize = standard.fftSize
         var hopSize = standard.hopSize
         var melBands = standard.melBands
         var sampleRate = standard.sampleRate
         var category = standard.runCategory
+        var maxAudioDuration = standard.maxAudioDuration
 
         for i in 1..<args.count {
             let arg = args[i]
@@ -148,9 +214,11 @@ struct BenchmarkConfig {
                 iterations = Int(args[i + 1]) ?? iterations
             } else if arg == "--warmup" || arg == "-w", i + 1 < args.count {
                 warmup = Int(args[i + 1]) ?? warmup
+            } else if arg == "--audio-file" || arg == "-f", i + 1 < args.count {
+                audioFilePath = args[i + 1]
             } else if arg == "--audio-length" || arg == "-a", i + 1 < args.count {
                 audioLength = Float(args[i + 1]) ?? audioLength
-            } else if arg == "--fft-size" || arg == "-f", i + 1 < args.count {
+            } else if arg == "--fft-size", i + 1 < args.count {
                 fftSize = Int(args[i + 1]) ?? fftSize
             } else if arg == "--hop-size" || arg == "-h", i + 1 < args.count {
                 hopSize = Int(args[i + 1]) ?? hopSize
@@ -162,6 +230,8 @@ struct BenchmarkConfig {
                 if let cat = BenchmarkCategory(rawValue: args[i + 1].lowercased()) {
                     category = cat
                 }
+            } else if arg == "--max-duration" || arg == "-d", i + 1 < args.count {
+                maxAudioDuration = Float(args[i + 1]) ?? maxAudioDuration
             } else if arg == "--help" {
                 printUsage()
                 exit(0)
@@ -171,12 +241,14 @@ struct BenchmarkConfig {
         return BenchmarkConfig(
             iterations: iterations,
             warmupIterations: warmup,
+            audioFilePath: audioFilePath,
             audioLength: audioLength,
             fftSize: fftSize,
             hopSize: hopSize,
             melBands: melBands,
             sampleRate: sampleRate,
-            runCategory: category
+            runCategory: category,
+            maxAudioDuration: maxAudioDuration
         )
     }
 
@@ -188,8 +260,10 @@ struct BenchmarkConfig {
             Options:
               --iterations, -i <num>     Number of benchmark iterations (default: \(standard.iterations))
               --warmup, -w <num>         Number of warmup iterations (default: \(standard.warmupIterations))
-              --audio-length, -a <sec>   Length of test audio in seconds (default: \(standard.audioLength))
-              --fft-size, -f <size>      FFT size (default: \(standard.fftSize))
+              --audio-file, -f <path>    Path to audio file for benchmarks (default: \(standard.audioFilePath))
+              --audio-length, -a <sec>   Length of test audio in seconds (used if no file, default: \(standard.audioLength))
+              --max-duration, -d <sec>   Maximum duration to use from audio file (default: \(standard.maxAudioDuration))
+              --fft-size <size>          FFT size (default: \(standard.fftSize))
               --hop-size, -h <size>      Hop size (default: \(standard.hopSize))
               --mel-bands, -m <bands>    Number of mel bands (default: \(standard.melBands))
               --sample-rate, -s <rate>   Sample rate in Hz (default: \(standard.sampleRate))
@@ -209,7 +283,8 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
     print("Configuration:")
     print("  Iterations: \(config.iterations)")
     print("  Warmup Iterations: \(config.warmupIterations)")
-    print("  Audio Length: \(config.audioLength) seconds")
+    print("  Audio File: \(config.audioFilePath)")
+    print("  Max Audio Duration: \(config.maxAudioDuration) seconds")
     print("  FFT Size: \(config.fftSize)")
     print("  Hop Size: \(config.hopSize)")
     print("  Mel Bands: \(config.melBands)")
@@ -217,15 +292,37 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
     print("  Category: \(config.runCategory.rawValue)")
     print("")
 
-    // Generate test audio
-    let sineWave = Utilities.generateSineWave(
-        frequency: 440.0,
-        sampleRate: config.sampleRate,
-        duration: config.audioLength
-    )
+    // Generate or load test audio
+    var audioSamples: [Float] = []
+
+    if let loadedAudio = loadAudioFromFile(filePath: config.audioFilePath) {
+        print("Successfully loaded audio from \(config.audioFilePath)")
+
+        // Limit audio duration if needed
+        let maxSamples = Int(config.maxAudioDuration * config.sampleRate)
+        if loadedAudio.count > maxSamples {
+            audioSamples = Array(loadedAudio.prefix(maxSamples))
+            print(
+                "Using first \(config.maxAudioDuration) seconds of audio (\(audioSamples.count) samples)"
+            )
+        } else {
+            audioSamples = loadedAudio
+            print(
+                "Using entire audio file (\(audioSamples.count) samples, \(Float(audioSamples.count) / config.sampleRate) seconds)"
+            )
+        }
+    } else {
+        print("Failed to load audio file, generating sine wave instead")
+        audioSamples = Utilities.generateSineWave(
+            frequency: 440.0,
+            sampleRate: config.sampleRate,
+            duration: config.audioLength
+        )
+        print("Generated \(audioSamples.count) samples of sine wave")
+    }
 
     // Initialize components
-    let dsp = DSP(fftSize: config.fftSize, sampleRate: config.sampleRate)
+    let _ = DSP(fftSize: config.fftSize, sampleRate: config.sampleRate)
     let fftProcessor = FFTProcessor(fftSize: config.fftSize)
     let spectrogramGenerator = SpectrogramGenerator(fftSize: config.fftSize)
     let melConverter = MelSpectrogramConverter(
@@ -250,33 +347,24 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         print("║                           DSP BENCHMARKS                                   ║")
         print("╚═══════════════════════════════════════════════════════════════════════════╝")
 
-        // Benchmark: Sine Wave Generation
-        let sineWaveBenchmark = Benchmark(name: "Sine Wave Generation")
-        sineWaveBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            let _ = Utilities.generateSineWave(
-                frequency: 440.0,
-                sampleRate: config.sampleRate,
-                duration: config.audioLength
-            )
-        }
-
         // Benchmark: FFT Processing
         let fftBenchmark = Benchmark(name: "FFT Processing")
         fftBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            let _ = fftProcessor.performFFT(inputBuffer: Array(sineWave.prefix(config.fftSize)))
+            let _ = fftProcessor.performFFT(inputBuffer: Array(audioSamples.prefix(config.fftSize)))
         }
 
         // Benchmark: Spectrogram Generation
         let spectrogramBenchmark = Benchmark(name: "Spectrogram Generation")
         spectrogramBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
             let _ = spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave, hopSize: config.hopSize)
+                inputBuffer: audioSamples, hopSize: config.hopSize)
         }
 
         // Benchmark: Mel Spectrogram Conversion
         let melSpecBenchmark = Benchmark(name: "Mel Spectrogram Conversion")
+        // Generate a smaller spectrogram for benchmarking
         let spectrogram = spectrogramGenerator.generateSpectrogram(
-            inputBuffer: sineWave, hopSize: config.hopSize)
+            inputBuffer: audioSamples, hopSize: config.hopSize)
         melSpecBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
             let _ = melConverter.specToMelSpec(spectrogram: spectrogram)
         }
@@ -292,7 +380,7 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         let streamingBenchmark = Benchmark(name: "Streaming Mel Processing")
         streamingBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
             streamingProcessor.reset()
-            streamingProcessor.addSamples(sineWave)
+            streamingProcessor.addSamples(audioSamples)
             let _ = streamingProcessor.processMelSpectrogram()
         }
 
@@ -300,7 +388,7 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         let pipelineBenchmark = Benchmark(name: "End-to-End DSP Pipeline")
         pipelineBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
             let spec = spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave, hopSize: config.hopSize)
+                inputBuffer: audioSamples, hopSize: config.hopSize)
             let melSpec = melConverter.specToMelSpec(spectrogram: spec)
             let _ = melConverter.melToLogMel(melSpectrogram: melSpec)
         }
@@ -314,7 +402,7 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
 
         // Create test mel spectrogram for ML benchmarks
         let spectrogram = spectrogramGenerator.generateSpectrogram(
-            inputBuffer: sineWave, hopSize: config.hopSize)
+            inputBuffer: audioSamples, hopSize: config.hopSize)
         let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
 
         // Benchmark: Model Loading
@@ -352,7 +440,7 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         audioProcessingBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations)
         {
             // Simulate audio processing with a simple gain adjustment
-            let _ = sineWave.map { $0 * 0.5 }
+            let _ = audioSamples.map { $0 * 0.5 }
         }
     }
 
@@ -367,13 +455,13 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         e2eBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
             // 1. Generate spectrogram
             let spec = spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave, hopSize: config.hopSize)
+                inputBuffer: audioSamples, hopSize: config.hopSize)
 
             // 2. Convert to mel spectrogram
             let melSpec = melConverter.specToMelSpec(spectrogram: spec)
 
             // 3. Convert to log mel spectrogram
-            let logMelSpec = melConverter.melToLogMel(melSpectrogram: melSpec)
+            let _ = melConverter.melToLogMel(melSpectrogram: melSpec)
 
             // 4. Process through voice conversion model (simulated)
             let convertedMelSpec = benchmarkModelInference.processVoiceConversion(

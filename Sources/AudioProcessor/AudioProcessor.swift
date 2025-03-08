@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import Utilities
 import os.lock
 
 /// Main class for handling real-time audio input and output using Core Audio's AudioUnit framework.
@@ -94,7 +95,7 @@ public class AudioProcessor {
         // Initialize buffer pool
         initializeBufferPool()
 
-        print("AudioProcessor initialized")
+        LoggerUtility.debug("AudioProcessor initialized")
     }
 
     deinit {
@@ -184,42 +185,42 @@ public class AudioProcessor {
         os_unfair_lock_lock(&stateLock)
         guard !_isRunning else {
             os_unfair_lock_unlock(&stateLock)
-            print("Audio capture already running")
+            LoggerUtility.debug("Audio capture already running")
             return true
         }
         os_unfair_lock_unlock(&stateLock)
 
         guard setupInputAudioUnit() else {
-            print("Failed to set up input audio unit")
+            LoggerUtility.debug("Failed to set up input audio unit")
             return false
         }
 
         guard setupOutputAudioUnit() else {
-            print("Failed to set up output audio unit")
+            LoggerUtility.debug("Failed to set up output audio unit")
             return false
         }
 
         var status = AudioUnitInitialize(inputAudioUnit!)
         guard status == noErr else {
-            print("Failed to initialize input audio unit: \(status)")
+            LoggerUtility.debug("Failed to initialize input audio unit: \(status)")
             return false
         }
 
         status = AudioUnitInitialize(outputAudioUnit!)
         guard status == noErr else {
-            print("Failed to initialize output audio unit: \(status)")
+            LoggerUtility.debug("Failed to initialize output audio unit: \(status)")
             return false
         }
 
         status = AudioOutputUnitStart(inputAudioUnit!)
         guard status == noErr else {
-            print("Failed to start input audio unit: \(status)")
+            LoggerUtility.debug("Failed to start input audio unit: \(status)")
             return false
         }
 
         status = AudioOutputUnitStart(outputAudioUnit!)
         guard status == noErr else {
-            print("Failed to start output audio unit: \(status)")
+            LoggerUtility.debug("Failed to start output audio unit: \(status)")
             return false
         }
 
@@ -227,7 +228,7 @@ public class AudioProcessor {
         _isRunning = true
         os_unfair_lock_unlock(&stateLock)
 
-        print("Audio capture started (simulated)")
+        LoggerUtility.debug("Audio capture started (simulated)")
         return true
     }
 
@@ -257,7 +258,7 @@ public class AudioProcessor {
             self.outputAudioUnit = nil
         }
 
-        print("Audio capture stopped (simulated)")
+        LoggerUtility.debug("Audio capture stopped (simulated)")
     }
 
     /**
@@ -274,14 +275,14 @@ public class AudioProcessor {
         os_unfair_lock_unlock(&stateLock)
 
         guard !currentlyRunning else {
-            print(
+            LoggerUtility.debug(
                 "Audio system is already running in real-time mode. Use the processing callback instead."
             )
             return false
         }
 
         guard setupOutputAudioUnit() else {
-            print("Failed to set up output audio unit for playback")
+            LoggerUtility.debug("Failed to set up output audio unit for playback")
             return false
         }
 
@@ -291,13 +292,13 @@ public class AudioProcessor {
 
         var status = AudioUnitInitialize(outputAudioUnit!)
         guard status == noErr else {
-            print("Failed to initialize output audio unit: \(status)")
+            LoggerUtility.debug("Failed to initialize output audio unit: \(status)")
             return false
         }
 
         status = AudioOutputUnitStart(outputAudioUnit!)
         guard status == noErr else {
-            print("Failed to start output audio unit: \(status)")
+            LoggerUtility.debug("Failed to start output audio unit: \(status)")
             return false
         }
 
@@ -309,7 +310,7 @@ public class AudioProcessor {
         AudioComponentInstanceDispose(outputAudioUnit!)
         outputAudioUnit = nil
 
-        print(
+        LoggerUtility.debug(
             "Playback completed (simulated duration: \(String(format: "%.1f", playbackDuration)) seconds)"
         )
         return true
@@ -361,13 +362,13 @@ public class AudioProcessor {
         inputComponentDescription.componentFlagsMask = 0
 
         guard let inputComponent = AudioComponentFindNext(nil, &inputComponentDescription) else {
-            print("Failed to find input audio component")
+            LoggerUtility.debug("Failed to find input audio component")
             return false
         }
 
         var status = AudioComponentInstanceNew(inputComponent, &inputAudioUnit)
         guard status == noErr, inputAudioUnit != nil else {
-            print("Failed to create input audio unit: \(status)")
+            LoggerUtility.debug("Failed to create input audio unit: \(status)")
             return false
         }
 
@@ -380,7 +381,7 @@ public class AudioProcessor {
             &enableInput,
             UInt32(MemoryLayout<UInt32>.size))
         guard status == noErr else {
-            print("Failed to enable input: \(status)")
+            LoggerUtility.debug("Failed to enable input: \(status)")
             return false
         }
 
@@ -393,7 +394,7 @@ public class AudioProcessor {
             &disableOutput,
             UInt32(MemoryLayout<UInt32>.size))
         guard status == noErr else {
-            print("Failed to disable output: \(status)")
+            LoggerUtility.debug("Failed to disable output: \(status)")
             return false
         }
 
@@ -412,7 +413,7 @@ public class AudioProcessor {
             &propertySize,
             &defaultInputDevice)
         guard status == noErr else {
-            print("Failed to get default input device: \(status)")
+            LoggerUtility.debug("Failed to get default input device: \(status)")
             return false
         }
 
@@ -424,7 +425,7 @@ public class AudioProcessor {
             &defaultInputDevice,
             UInt32(MemoryLayout<AudioDeviceID>.size))
         guard status == noErr else {
-            print("Failed to set input device: \(status)")
+            LoggerUtility.debug("Failed to set input device: \(status)")
             return false
         }
 
@@ -437,7 +438,7 @@ public class AudioProcessor {
             &asbd,
             UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         guard status == noErr else {
-            print("Failed to set input format: \(status)")
+            LoggerUtility.debug("Failed to set input format: \(status)")
             return false
         }
 
@@ -454,7 +455,7 @@ public class AudioProcessor {
             &inputCallbackStruct,
             UInt32(MemoryLayout<AURenderCallbackStruct>.size))
         guard status == noErr else {
-            print("Failed to set input callback: \(status)")
+            LoggerUtility.debug("Failed to set input callback: \(status)")
             return false
         }
 
@@ -467,7 +468,7 @@ public class AudioProcessor {
             &maxFramesPerSlice,
             UInt32(MemoryLayout<UInt32>.size))
         guard status == noErr else {
-            print("Failed to set input buffer size: \(status)")
+            LoggerUtility.debug("Failed to set input buffer size: \(status)")
             return false
         }
 
@@ -488,13 +489,13 @@ public class AudioProcessor {
         outputComponentDescription.componentFlagsMask = 0
 
         guard let outputComponent = AudioComponentFindNext(nil, &outputComponentDescription) else {
-            print("Failed to find output audio component")
+            LoggerUtility.debug("Failed to find output audio component")
             return false
         }
 
         var status = AudioComponentInstanceNew(outputComponent, &outputAudioUnit)
         guard status == noErr, outputAudioUnit != nil else {
-            print("Failed to create output audio unit: \(status)")
+            LoggerUtility.debug("Failed to create output audio unit: \(status)")
             return false
         }
 
@@ -507,7 +508,7 @@ public class AudioProcessor {
             &asbd,
             UInt32(MemoryLayout<AudioStreamBasicDescription>.size))
         guard status == noErr else {
-            print("Failed to set output format: \(status)")
+            LoggerUtility.debug("Failed to set output format: \(status)")
             return false
         }
 
@@ -524,7 +525,7 @@ public class AudioProcessor {
             &outputCallbackStruct,
             UInt32(MemoryLayout<AURenderCallbackStruct>.size))
         guard status == noErr else {
-            print("Failed to set output callback: \(status)")
+            LoggerUtility.debug("Failed to set output callback: \(status)")
             return false
         }
 
@@ -537,7 +538,7 @@ public class AudioProcessor {
             &maxFramesPerSlice,
             UInt32(MemoryLayout<UInt32>.size))
         guard status == noErr else {
-            print("Failed to set output buffer size: \(status)")
+            LoggerUtility.debug("Failed to set output buffer size: \(status)")
             return false
         }
 

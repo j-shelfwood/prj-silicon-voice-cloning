@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import Utilities
 
 /// Manages the creation, configuration, and lifecycle of AudioUnit instances.
 /// This class encapsulates all low-level AudioUnit interactions, providing a clean interface
@@ -104,13 +105,13 @@ public class AudioUnitManager {
         componentDescription.componentFlagsMask = 0
 
         guard let component = AudioComponentFindNext(nil, &componentDescription) else {
-            print("Failed to find audio component")
+            LoggerUtility.debug("Failed to find audio component")
             return false
         }
 
         var status = AudioComponentInstanceNew(component, &audioUnit)
         guard status == noErr, let audioUnit = audioUnit else {
-            print("Failed to create audio unit: \(status)")
+            LoggerUtility.debug("Failed to create audio unit: \(status)")
             return false
         }
 
@@ -140,7 +141,7 @@ public class AudioUnitManager {
         )
 
         guard status == noErr else {
-            print("Failed to enable IO: \(status)")
+            LoggerUtility.debug("Failed to enable IO: \(status)")
             return false
         }
 
@@ -156,7 +157,7 @@ public class AudioUnitManager {
         )
 
         guard status == noErr else {
-            print("Failed to set stream format: \(status)")
+            LoggerUtility.debug("Failed to set stream format: \(status)")
             return false
         }
 
@@ -173,7 +174,7 @@ public class AudioUnitManager {
             )
 
             guard status == noErr else {
-                print("Failed to set render callback: \(status)")
+                LoggerUtility.debug("Failed to set render callback: \(status)")
                 return false
             }
         }

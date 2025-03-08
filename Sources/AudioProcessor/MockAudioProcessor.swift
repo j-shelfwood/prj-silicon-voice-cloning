@@ -55,7 +55,7 @@ public class MockAudioProcessor: AudioProcessorProtocol {
     public func startCapture() -> Bool {
         guard !isRunning else {
             logDebug("MockAudioProcessor: Audio capture already running")
-            return false
+            return true
         }
 
         guard config.captureSucceeds else {
@@ -88,6 +88,12 @@ public class MockAudioProcessor: AudioProcessorProtocol {
 
     /// Simulates playing audio
     public func playAudio(_ buffer: [Float]) -> Bool {
+        // Check if the processor is already running in real-time mode
+        guard !isRunning else {
+            logDebug("MockAudioProcessor: Cannot play audio while running in real-time mode")
+            return false
+        }
+
         guard config.playbackSucceeds else {
             logDebug("MockAudioProcessor: Audio playback failed (simulated failure)")
             return false

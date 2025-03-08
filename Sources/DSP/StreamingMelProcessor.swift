@@ -194,15 +194,20 @@ public class StreamingMelProcessor {
         - frameCount: Number of frames to generate
         - ref: Reference value for log scaling
         - minLevel: Minimum level for clipping
+        - minDb: Minimum dB value for output clipping (default: -80.0)
+        - maxDb: Maximum dB value for output clipping (default: 0.0)
      - Returns: Array of log-mel spectrogram frames
      */
     public func processLogMelSpectrogram(
         frameCount: Int,
         ref: Float = 1.0,
-        minLevel: Float = 1e-5
+        minLevel: Float = 1e-5,
+        minDb: Float = -80.0,
+        maxDb: Float = 0.0
     ) -> [[Float]] {
         // Check cache first
-        let key = "\(cacheKey(frameCount: frameCount))_ref_\(ref)_min_\(minLevel)"
+        let key =
+            "\(cacheKey(frameCount: frameCount))_ref_\(ref)_min_\(minLevel)_minDb_\(minDb)_maxDb_\(maxDb)"
 
         os_unfair_lock_lock(&cacheLock)
         if let cached = logMelCache[key] {
@@ -216,7 +221,7 @@ public class StreamingMelProcessor {
 
         // Convert to log scale
         let logMelFrames = melConverter.melToLogMel(
-            melSpectrogram: melFrames, ref: ref, floor: minLevel)
+            melSpectrogram: melFrames, ref: ref, floor: minLevel, minDb: minDb, maxDb: maxDb)
 
         // Cache the result
         os_unfair_lock_lock(&cacheLock)
@@ -229,9 +234,15 @@ public class StreamingMelProcessor {
     /**
      Process audio buffer to generate log-mel spectrogram frames.
 
+     - Parameters:
+        - minDb: Minimum dB value for output clipping (default: -80.0)
+        - maxDb: Maximum dB value for output clipping (default: 0.0)
      - Returns: Tuple containing log-mel spectrogram frames and number of samples consumed
      */
-    public func processLogMelSpectrogram() -> ([[Float]], Int) {
+    public func processLogMelSpectrogram(
+        minDb: Float = -80.0,
+        maxDb: Float = 0.0
+    ) -> ([[Float]], Int) {
         // Determine how many frames we can process
         os_unfair_lock_lock(&bufferLock)
         let bufferSize = audioBuffer.count
@@ -242,7 +253,11 @@ public class StreamingMelProcessor {
         }
 
         let frameCount = (bufferSize - fftSize) / hopSize + 1
-        let logMelSpectrogram = processLogMelSpectrogram(frameCount: frameCount)
+        let logMelSpectrogram = processLogMelSpectrogram(
+            frameCount: frameCount,
+            minDb: minDb,
+            maxDb: maxDb
+        )
         let samplesConsumed = frameCount > 0 ? fftSize + (frameCount - 1) * hopSize : 0
 
         return (logMelSpectrogram, samplesConsumed)

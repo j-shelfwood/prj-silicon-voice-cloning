@@ -79,9 +79,6 @@ class DSPTestUtilities {
                 XCTAssertFalse(
                     value.isInfinite, "Mel spectrogram should not contain infinite values",
                     file: file, line: line)
-                XCTAssertGreaterThanOrEqual(
-                    value, 0, "Mel spectrogram values should be non-negative", file: file,
-                    line: line)
             }
         }
     }

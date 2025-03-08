@@ -11,7 +11,7 @@ public class MelSpectrogramConverter {
     private let minFrequency: Float
     private let maxFrequency: Float
     private let useHTK: Bool
-    private var melFilterbank: [[Float]]?
+    private var melFilterbank: [[Float]] = []
 
     // Cache for vectorized operations
     private var flatFilterbank: [Float]?
@@ -107,177 +107,146 @@ public class MelSpectrogramConverter {
     }
 
     /**
-     Convert spectrogram to mel-spectrogram using mel filterbank.
+     Convert a linear frequency spectrogram to a mel-scaled spectrogram
 
-     - Parameter spectrogram: Linear frequency spectrogram
-     - Returns: Mel-scaled spectrogram
+     - Parameter spectrogram: Linear frequency spectrogram (time x frequency)
+     - Returns: Mel-scaled spectrogram (time x mel_bands)
      */
     public func specToMelSpec(spectrogram: [[Float]]) -> [[Float]] {
-        guard !spectrogram.isEmpty else {
-            print("Error: Empty spectrogram provided to specToMelSpec")
+        // Check if spectrogram is empty
+        guard !spectrogram.isEmpty && !spectrogram[0].isEmpty else {
+            LoggerUtility.debug("Error: Empty spectrogram provided to specToMelSpec")
             return []
         }
 
         // Check cache first
-        let key = cacheKey(spectrogram: spectrogram, operation: "mel")
-        if let cachedResult = getCachedResult(key: key) {
-            return cachedResult
+        let cacheKey = self.cacheKey(spectrogram: spectrogram, operation: "mel")
+        if let cached = getCachedResult(key: cacheKey) {
+            return cached
         }
 
-        let numFrames = spectrogram.count
-        let numFreqBins = spectrogram[0].count
-
-        os_unfair_lock_lock(&filterBankLock)
-        // Create or update mel filterbank if needed
-        if melFilterbank == nil || lastSpectrogramWidth != numFreqBins {
-            melFilterbank = createMelFilterbank(fftSize: numFreqBins * 2)
-            lastSpectrogramWidth = numFreqBins
-
-            // Prepare vectorized filterbank
-            if let fb = melFilterbank {
-                // Flatten the filterbank for vectorized operations
-                flatFilterbank = fb.flatMap { $0 }
-                filterBankStrides = Array(repeating: numFreqBins, count: melBands)
-
-                // Pre-allocate buffers
-                processedBuffer = [Float](repeating: 0.0, count: numFreqBins)
-                resultBuffer = [Float](repeating: 0.0, count: melBands)
-            }
+        // Create mel filterbank if not already created
+        if melFilterbank.isEmpty {
+            melFilterbank = createMelFilterbank(fftSize: spectrogram[0].count * 2)
         }
 
-        guard let flatFB = flatFilterbank,
-            let processedBuf = processedBuffer,
-            let resultBuf = resultBuffer
-        else {
-            os_unfair_lock_unlock(&filterBankLock)
-            print("Error: Failed to create mel filterbank")
+        // Check if filterbank creation was successful
+        guard !melFilterbank.isEmpty else {
+            LoggerUtility.debug("Error: Failed to create mel filterbank")
             return []
         }
-        os_unfair_lock_unlock(&filterBankLock)
 
+        // Get dimensions
+        let numFrames = spectrogram.count
+        let numBins = spectrogram[0].count
+
+        // Pre-allocate the mel spectrogram
         var melSpectrogram = [[Float]](
             repeating: [Float](repeating: 0.0, count: melBands), count: numFrames)
 
-        // Flatten the input spectrogram for vectorized operations
-        let flatSpectrogram = spectrogram.flatMap { $0 }
+        // Check if we need to prepare the flat filterbank for vectorized operations
+        os_unfair_lock_lock(&filterBankLock)
+        if flatFilterbank == nil || lastSpectrogramWidth != numBins {
+            // Flatten the filterbank for vectorized operations
+            flatFilterbank = [Float](repeating: 0.0, count: melBands * numBins)
+            filterBankStrides = [Int](repeating: 0, count: melBands)
 
-        // Process each frame using vDSP
+            for i in 0..<melBands {
+                filterBankStrides![i] = i * numBins
+                for j in 0..<numBins {
+                    flatFilterbank![i * numBins + j] = melFilterbank[i][j]
+                }
+            }
+
+            lastSpectrogramWidth = numBins
+        }
+
+        // We don't need these buffers for the current implementation, but keep the properties for future use
+        if processedBuffer == nil || processedBuffer!.count != numBins {
+            processedBuffer = [Float](repeating: 0.0, count: numBins)
+        }
+
+        if resultBuffer == nil || resultBuffer!.count != melBands {
+            resultBuffer = [Float](repeating: 0.0, count: melBands)
+        }
+
+        // Create a buffer for the filterbank slice to avoid creating a new array for each dot product
+        var filterBankSlice = [Float](repeating: 0.0, count: numBins)
+
+        let localFlatFilterbank = flatFilterbank!
+        let localFilterBankStrides = filterBankStrides!
+        os_unfair_lock_unlock(&filterBankLock)
+
+        // Process each frame using vectorized operations
         for i in 0..<numFrames {
-            let frameStart = i * numFreqBins
-            let frame = Array(flatSpectrogram[frameStart..<frameStart + numFreqBins])
+            // Get the current frame
+            let frame = spectrogram[i]
 
-            // Create a local copy of the pre-allocated buffers
-            var localProcessedBuffer = processedBuf
-            var localResultBuffer = resultBuf
+            // Use vDSP for matrix multiplication (dot product for each mel band)
+            for j in 0..<melBands {
+                let filterBankOffset = localFilterBankStrides[j]
 
-            // Add small epsilon to avoid zero values and ensure positive values
-            var epsilon: Float = 1e-10
-            var maxPossible: Float = Float.greatestFiniteMagnitude
+                // Copy the filterbank slice to the buffer
+                for k in 0..<numBins {
+                    filterBankSlice[k] = localFlatFilterbank[filterBankOffset + k]
+                }
 
-            // First ensure all values are positive
-            vDSP_vclip(
-                frame, 1, &epsilon, &maxPossible, &localProcessedBuffer, 1, vDSP_Length(frame.count)
-            )
+                // Perform dot product: sum(frame[k] * filterbank[j][k])
+                var sum: Float = 0.0
+                vDSP_dotpr(frame, 1, filterBankSlice, 1, &sum, vDSP_Length(numBins))
 
-            // Perform matrix multiplication using vDSP
-            vDSP_mmul(
-                flatFB,  // Matrix A (filterbank)
-                1,  // A row stride
-                localProcessedBuffer,  // Matrix B (spectrogram frame)
-                1,  // B row stride
-                &localResultBuffer,  // Result matrix C
-                1,  // C row stride
-                vDSP_Length(melBands),  // Number of rows in A and C
-                1,  // Number of columns in B and C
-                vDSP_Length(numFreqBins)  // Number of columns in A and rows in B
-            )
-
-            // Ensure non-negative values and add small epsilon
-            vDSP_vclip(
-                localResultBuffer, 1, &epsilon, &maxPossible, &localResultBuffer, 1,
-                vDSP_Length(melBands))
-
-            melSpectrogram[i] = localResultBuffer
+                // Replace NaN values with zeros
+                melSpectrogram[i][j] = sum.isNaN ? 0.0 : sum
+            }
         }
 
         // Cache the result
-        cacheResult(key: key, result: melSpectrogram)
+        cacheResult(key: cacheKey, result: melSpectrogram)
 
         return melSpectrogram
     }
 
     /**
-     Convert mel-spectrogram to log-mel-spectrogram.
+     Convert a mel-spectrogram to a log-mel-spectrogram
 
      - Parameters:
         - melSpectrogram: Mel-scaled spectrogram
         - ref: Reference value for log scaling (default: 1.0)
         - floor: Floor value to clip small values (default: 1e-5)
+        - minDb: Minimum dB value to clip results (default: -80.0)
+        - maxDb: Maximum dB value to clip results (default: 0.0)
      - Returns: Log-mel-spectrogram
      */
-    public func melToLogMel(melSpectrogram: [[Float]], ref: Float = 1.0, floor: Float = 1e-5)
-        -> [[Float]]
-    {
-        guard !melSpectrogram.isEmpty else {
-            print("Error: Empty mel-spectrogram provided to melToLogMel")
+    public func melToLogMel(
+        melSpectrogram: [[Float]],
+        ref: Float = 1.0,
+        floor: Float = 1e-5,
+        minDb: Float = -80.0,
+        maxDb: Float = 0.0
+    ) -> [[Float]] {
+        // Check if mel spectrogram is empty
+        guard !melSpectrogram.isEmpty && !melSpectrogram[0].isEmpty else {
+            LoggerUtility.debug("Error: Empty mel-spectrogram provided to melToLogMel")
             return []
         }
 
-        // Check cache first
-        let key = cacheKey(spectrogram: melSpectrogram, operation: "logmel")
-        if let cachedResult = getCachedResult(key: key) {
-            return cachedResult
-        }
-
+        // Pre-allocate the log-mel spectrogram
         let numFrames = melSpectrogram.count
         let numBands = melSpectrogram[0].count
-        var minDb: Float = -80.0  // Minimum dB value to clip to
-        var maxDb: Float = 0.0  // Maximum dB value (reference level)
-
-        // Flatten the mel spectrogram for vectorized operations
-        let flatMel = melSpectrogram.flatMap { $0 }
-
-        // Ensure all values are positive and above floor
-        var processedMel = [Float](repeating: 0.0, count: flatMel.count)
-        var floorValue = floor
-        var maxPossible: Float = Float.greatestFiniteMagnitude
-        vDSP_vclip(
-            flatMel, 1, &floorValue, &maxPossible, &processedMel, 1, vDSP_Length(flatMel.count))
-
-        // Find maximum value using vDSP
-        var maxValue: Float = 0.0
-        vDSP_maxv(processedMel, 1, &maxValue, vDSP_Length(processedMel.count))
-        maxValue = max(maxValue, floor)  // Ensure maxValue is at least floor
-
-        // Create buffer for results
-        var logMelFlat = [Float](repeating: 0.0, count: flatMel.count)
-
-        // Normalize by maxValue and ensure minimum value
-        var recipMaxValue = 1.0 / maxValue
-        vDSP_vsmul(processedMel, 1, &recipMaxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
-
-        // Ensure all values are at least floor after normalization
-        vDSP_vclip(
-            logMelFlat, 1, &floorValue, &maxPossible, &logMelFlat, 1, vDSP_Length(flatMel.count))
-
-        // Convert to log scale (10 * log10(x))
-        var ten: Float = 10.0
-        vDSP_vdbcon(logMelFlat, 1, &ten, &logMelFlat, 1, vDSP_Length(flatMel.count), 1)
-
-        // Clip to dB range
-        vDSP_vclip(logMelFlat, 1, &minDb, &maxDb, &logMelFlat, 1, vDSP_Length(flatMel.count))
-
-        // Reshape back to 2D array using pre-allocated memory
         var logMelSpectrogram = [[Float]](
             repeating: [Float](repeating: 0.0, count: numBands), count: numFrames)
 
+        // Convert to log scale
         for i in 0..<numFrames {
-            let start = i * numBands
-            logMelSpectrogram[i] = Array(logMelFlat[start..<start + numBands])
+            for j in 0..<numBands {
+                // Ensure value is at least floor
+                let value = max(melSpectrogram[i][j], floor)
+                // Convert to log scale: 10 * log10(value / ref)
+                let logValue = 10.0 * log10(value / ref)
+                // Clamp to the specified dB range
+                logMelSpectrogram[i][j] = min(maxDb, max(minDb, logValue))
+            }
         }
-
-        // Cache the result
-        cacheResult(key: key, result: logMelSpectrogram)
 
         return logMelSpectrogram
     }

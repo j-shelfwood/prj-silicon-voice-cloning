@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import Utilities
 import os.lock
 
 /// Manages audio input capture from the microphone using Core Audio's AudioUnit framework.
@@ -133,7 +134,7 @@ public class AudioInputProcessor {
         os_unfair_lock_lock(&stateLock)
         guard !_isRunning else {
             os_unfair_lock_unlock(&stateLock)
-            print("Audio input capture already running")
+            LoggerUtility.debug("Audio input capture already running")
             return true
         }
         os_unfair_lock_unlock(&stateLock)
@@ -158,17 +159,17 @@ public class AudioInputProcessor {
         )
 
         guard audioUnitManager?.setup(renderCallback: inputCallbackStruct) == true else {
-            print("Failed to set up input audio unit")
+            LoggerUtility.debug("Failed to set up input audio unit")
             return false
         }
 
         guard audioUnitManager?.initialize() == true else {
-            print("Failed to initialize input audio unit")
+            LoggerUtility.debug("Failed to initialize input audio unit")
             return false
         }
 
         guard audioUnitManager?.start() == true else {
-            print("Failed to start input audio unit")
+            LoggerUtility.debug("Failed to start input audio unit")
             return false
         }
 
@@ -176,7 +177,7 @@ public class AudioInputProcessor {
         _isRunning = true
         os_unfair_lock_unlock(&stateLock)
 
-        print("Audio input capture started")
+        LoggerUtility.debug("Audio input capture started")
         return true
     }
 
@@ -194,7 +195,7 @@ public class AudioInputProcessor {
         audioUnitManager?.dispose()
         audioUnitManager = nil
 
-        print("Audio input capture stopped")
+        LoggerUtility.debug("Audio input capture stopped")
     }
 
     /// Gets the latest captured audio buffer

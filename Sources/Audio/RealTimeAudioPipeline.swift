@@ -1,5 +1,6 @@
 import AudioToolbox
 import Foundation
+import Utilities
 import os.lock  // Import for os_unfair_lock
 
 /// Manages a real-time audio processing pipeline that captures audio input,
@@ -187,7 +188,7 @@ public class RealTimeAudioPipeline {
 
         // Start output first to ensure it's ready to receive audio
         guard outputProcessor.start() else {
-            print("Failed to start audio output")
+            LoggerUtility.debug("Failed to start audio output")
             return false
         }
 
@@ -195,7 +196,7 @@ public class RealTimeAudioPipeline {
         guard inputProcessor.start() else {
             // If input fails, stop output
             outputProcessor.stop()
-            print("Failed to start audio input")
+            LoggerUtility.debug("Failed to start audio input")
             return false
         }
 
@@ -204,7 +205,7 @@ public class RealTimeAudioPipeline {
         _isRunning = true
         os_unfair_lock_unlock(&stateLock)
 
-        print("Real-time audio pipeline started")
+        LoggerUtility.debug("Real-time audio pipeline started")
         return true
     }
 
@@ -219,7 +220,7 @@ public class RealTimeAudioPipeline {
         _inputProcessor?.stop()
         _outputProcessor?.stop()
 
-        print("Real-time audio pipeline stopped")
+        LoggerUtility.debug("Real-time audio pipeline stopped")
     }
 
     /// Plays a buffer of audio samples through the output device
