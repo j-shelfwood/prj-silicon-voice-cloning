@@ -1,7 +1,5 @@
 # Development Log: Real-Time Voice Cloning on Apple Silicon
 
-This document serves as an ongoing development log for our Real-Time Voice Cloning project, tracking progress, technical discoveries, and important decisions. Each entry will include technical details about Swift, Core Audio, ML implementation, and our progress toward the overall goal of sub-100ms voice cloning.
-
 ## 2025-03-06: Project Setup and Initial Structure
 
 ### Progress Summary
@@ -502,7 +500,7 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 ---
 
-## 2025-03-10: Benchmarking Utility and Test Suite Refinement
+## 2025-03-08: Benchmarking Utility and Test Suite Refinement
 
 ### Progress Summary
 
@@ -572,3 +570,53 @@ swift run benchmarks --iterations 10 --warmup 3
 # Customize audio parameters
 swift run benchmarks --audio-length 10.0 --fft-size 2048 --hop-size 512
 ```
+
+
+## 2025-03-08: Concurrency and Testing Improvements
+
+### Completed:
+
+1. **Concurrency Safety Improvements**:
+   - Added `@MainActor` annotations to `ModelInference.swift` methods to ensure thread safety
+   - Updated test files to properly handle async/await patterns
+   - Fixed data race issues in the codebase
+
+2. **Test Suite Refinement**:
+   - Removed performance-related tests from the main test suite
+   - Commented out `Thread.sleep` calls and latency assertions in functional tests
+   - Added `XCTSkip` for tests that aren't ready for implementation yet
+
+3. **Benchmarking Utility Enhancement**:
+   - Created a dedicated `Benchmarks` module separate from the test suite
+   - Implemented a `BenchmarkModelInference` class for synchronous benchmarking
+   - Added various benchmark categories (DSP, ML, audio, critical path)
+   - Ensured benchmarks run asynchronously on the main actor
+
+4. **Code Organization**:
+   - Split large files into more focused components:
+     - Separated DSP functionality into `FFTProcessor`, `SpectrogramGenerator`, `MelSpectrogramConverter`, and `StreamingMelProcessor`
+     - Created utility classes for specific functions (`AudioSignalUtility`, `LoggerUtility`, `TimerUtility`)
+
+### Remaining Tasks:
+
+1. **Complete Module Separation**:
+   - Finish implementing the empty utility files (`LoggerUtility.swift`, `TimerUtility.swift`, etc.)
+   - Move functionality from the main `Utilities.swift` file into the appropriate utility classes
+
+2. **CLI Improvements**:
+   - Implement the `CommandRouter.swift` for better CLI command handling
+   - Move CLI logic from `prj-silicon-voice-cloning/main.swift` to `CLI/main.swift`
+
+3. **ML Module Refinement**:
+   - Implement the empty ML helper files (`ModelLoader.swift`, `ModelRunner.swift`, `PerformanceTracker.swift`)
+   - Move functionality from `ModelInference.swift` into these more specialized classes
+
+4. **Documentation**:
+   - Add clear "TODO" comments to placeholder implementations
+   - Ensure all new files and functions have proper documentation
+
+5. **Performance Optimization**:
+   - Continue refining the benchmarking utility
+   - Identify and address performance bottlenecks in the DSP and ML pipelines
+
+The codebase is now more maintainable, with better separation of concerns and improved concurrency safety. The test suite runs faster and focuses on correctness rather than performance, while the dedicated benchmarking utility provides comprehensive performance measurements.
