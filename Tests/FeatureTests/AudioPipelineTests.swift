@@ -153,34 +153,4 @@ final class AudioPipelineTests: XCTestCase {
         XCTAssertLessThan(audioProcessor.measuredLatency, 100.0, "End-to-end latency should be under 100ms")
         */
     }
-
-    func testPerformanceOfFullPipeline() throws {
-        // Skip this test until we have the full pipeline implemented
-        throw XCTSkip("Skipping performance test until full pipeline is implemented")
-
-        /*
-        // Generate a test signal
-        let sineWave = Utilities.generateSineWave(frequency: 440.0, sampleRate: 44100.0, duration: 5.0)
-
-        // Set up the audio processing callback
-        audioProcessor.audioProcessingCallback = { [weak self] buffer in
-            guard let self = self else { return buffer }
-
-            // Full processing pipeline
-            let spectrum = self.dsp.performFFT(inputBuffer: buffer)
-            let spectrogram = self.dsp.generateSpectrogram(inputBuffer: buffer)
-            let melSpectrogram = self.dsp.specToMelSpec(spectrogram: spectrogram)
-
-            // Run inference (placeholder)
-            // let result: [Float]? = self.modelInference.runInference(input: melSpectrogram)
-
-            return buffer
-        }
-
-        // Measure the performance of the full pipeline
-        measure {
-            _ = audioProcessor.playAudio(sineWave)
-        }
-        */
-    }
 }

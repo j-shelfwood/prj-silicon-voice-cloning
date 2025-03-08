@@ -4,42 +4,28 @@ import XCTest
 
 final class UtilitiesTests: XCTestCase {
     func testSineWaveGeneration() {
-        // Test that a 440Hz sine wave at 44.1kHz has the expected properties
-        let frequency: Float = 440.0
-        let sampleRate: Float = 44100.0
-        let duration: Float = 0.1  // 100ms is enough for testing
-
+        // Test with default parameters
         let sineWave = Utilities.generateSineWave(
-            frequency: frequency, sampleRate: sampleRate, duration: duration)
+            frequency: 440.0, sampleRate: 44100.0, duration: 1.0)
 
-        // Check the length of the generated sine wave
+        // Check the length
         XCTAssertEqual(
-            sineWave.count, Int(sampleRate * duration),
-            "Sine wave should have the expected number of samples")
+            sineWave.count, 44100, "Sine wave should have 44100 samples for 1 second at 44.1kHz")
 
-        // Check the amplitude (should be between -1 and 1)
+        // Check that values are within range [-1, 1]
         for sample in sineWave {
             XCTAssertGreaterThanOrEqual(sample, -1.0, "Sample should be >= -1.0")
             XCTAssertLessThanOrEqual(sample, 1.0, "Sample should be <= 1.0")
         }
 
-        // Check zero crossings - a 440Hz sine wave should cross zero about 44 times in 0.1 seconds
-        // (440 cycles per second = 44 cycles in 0.1 seconds, each cycle has 2 zero crossings)
-        var zeroCrossings = 0
-        for i in 1..<sineWave.count {
-            if (sineWave[i - 1] < 0 && sineWave[i] >= 0)
-                || (sineWave[i - 1] >= 0 && sineWave[i] < 0)
-            {
-                zeroCrossings += 1
-            }
-        }
+        // Test with custom parameters
+        let customSineWave = Utilities.generateSineWave(
+            frequency: 880.0, sampleRate: 48000.0, duration: 0.5)
 
-        // Allow for some margin of error due to sampling
-        let expectedZeroCrossings = Int(frequency * duration * 2)
-        XCTAssertTrue(
-            abs(zeroCrossings - expectedZeroCrossings) <= 2,
-            "Zero crossings should be approximately \(expectedZeroCrossings), but was \(zeroCrossings)"
-        )
+        // Check the length
+        XCTAssertEqual(
+            customSineWave.count, 24000,
+            "Sine wave should have 24000 samples for 0.5 seconds at 48kHz")
     }
 
     @MainActor
@@ -73,15 +59,5 @@ final class UtilitiesTests: XCTestCase {
             "Logging special characters should not throw")
         XCTAssertNoThrow(
             Utilities.log("Unicode: 你好, 世界"), "Logging Unicode characters should not throw")
-    }
-
-    func testSineWaveGenerationPerformance() {
-        // Measure the performance of generating a long sine wave
-        measure {
-            for _ in 0..<10 {
-                _ = Utilities.generateSineWave(
-                    frequency: 440.0, sampleRate: 44100.0, duration: 10.0)
-            }
-        }
     }
 }

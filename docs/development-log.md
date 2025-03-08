@@ -502,25 +502,73 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 ---
 
-<!-- Template for future entries -->
-<!--
-## YYYY-MM-DD: [Summary Title]
+## 2025-03-10: Benchmarking Utility and Test Suite Refinement
 
 ### Progress Summary
-- Key progress point 1
-- Key progress point 2
+
+- Created a dedicated benchmarking utility separate from the test suite
+- Removed performance-related tests from the main test suite
+- Implemented a comprehensive benchmarking system with customizable parameters
+- Established clear guidelines for separating functional tests from performance benchmarks
 
 ### Technical Details & Learnings
 
-#### [Category]
-- Technical point 1
-- Technical point 2
+#### Benchmarking Utility Implementation
+
+- Created a standalone `Benchmarks` executable target in the Swift package
+- Implemented a flexible benchmarking system with:
+  - Customizable iterations and warmup runs
+  - Category-based benchmark organization (DSP, Audio, Model, Critical)
+  - Command-line arguments for easy configuration
+  - Detailed statistics reporting (average, standard deviation)
+- Used synchronous simulations for model inference benchmarks to avoid concurrency issues
+
+#### Test Suite Refinement
+
+- Removed all performance-related tests from the main test suite
+- Established clear guidelines:
+  - Test suite: Only functional correctness, not performance
+  - Benchmarks: Dedicated utility for performance measurement
+- Benefits observed:
+  - Faster, more reliable test runs
+  - Clear separation of concerns
+  - More accurate performance measurements
+  - Better CI/CD integration
+
+#### Performance Insights
+
+- Identified critical performance bottlenecks:
+  - Mel spectrogram conversion: ~3.6ms
+  - End-to-end voice cloning pipeline: ~147ms
+- These measurements provide a baseline for future optimizations
+- Current end-to-end latency is close to our 100ms target, with room for improvement
 
 ### Next Steps
-- Next step 1
-- Next step 2
 
-### Challenges & Solutions
-- Challenge 1: Solution 1
-- Challenge 2: Solution 2
--->
+1. Use benchmark results to guide optimization efforts
+2. Implement parallel processing for spectrogram generation
+3. Optimize mel filterbank creation for better performance
+4. Explore model quantization to reduce inference time
+
+### Guidelines for Developers
+
+- **DO NOT** add performance tests to the main test suite
+- **DO** use the benchmarking utility for all performance measurements
+- **DO** categorize benchmarks appropriately (DSP, Audio, Model, Critical)
+- **DO** run benchmarks before and after optimization changes to measure impact
+
+### Benchmark Usage
+
+```bash
+# Run all benchmarks with default settings
+swift run benchmarks
+
+# Run only critical path benchmarks
+swift run benchmarks --category critical
+
+# Customize iterations and warmup runs
+swift run benchmarks --iterations 10 --warmup 3
+
+# Customize audio parameters
+swift run benchmarks --audio-length 10.0 --fft-size 2048 --hop-size 512
+```

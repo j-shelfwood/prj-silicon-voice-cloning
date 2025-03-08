@@ -129,22 +129,4 @@ final class StreamingMelProcessorTests: DSPBaseTestCase {
         processor.reset()
         XCTAssertEqual(processor.getBufferLength(), 0)
     }
-
-    func testPerformanceOfMelSpectrogram() {
-        let sineWave = generateTestSignal(duration: 5.0)  // 5 seconds of audio
-        processor.addSamples(sineWave)
-
-        measurePerformance { [unowned self] in
-            let (_, _) = self.processor.processMelSpectrogram()
-        }
-    }
-
-    func testPerformanceOfLogMelSpectrogram() {
-        let sineWave = generateTestSignal(duration: 5.0)  // 5 seconds of audio
-        processor.addSamples(sineWave)
-
-        measurePerformance { [unowned self] in
-            let (_, _) = self.processor.processLogMelSpectrogram()
-        }
-    }
 }

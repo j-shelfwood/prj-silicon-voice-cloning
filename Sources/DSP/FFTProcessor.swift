@@ -39,7 +39,7 @@ public class FFTProcessor {
             Utilities.log(
                 "Error: Input buffer too small for FFT. Expected at least \(fftSize) samples, got \(inputBuffer.count)."
             )
-            return Array(repeating: 0.0, count: fftSize / 2)
+            return []
         }
 
         // Create a copy of the input buffer to avoid modifying the original
@@ -71,7 +71,7 @@ public class FFTProcessor {
                 // Perform forward FFT
                 guard let fftSetup = fftSetup else {
                     Utilities.log("Error: FFT setup not initialized")
-                    return Array(repeating: 0.0, count: fftSize / 2)
+                    return []
                 }
 
                 // Use the FFT setup to perform the forward transform

@@ -32,6 +32,7 @@ The project involves:
     ├── AudioProcessor/             # Core Audio handling (input/output)
     ├── DSP/                        # Signal processing via Accelerate (FFT, Mel-spectrogram)
     ├── ModelInference/             # Core ML model integration and inference
+    ├── Benchmarks/                 # Performance benchmarking utility
     └── Utilities/                  # Helper utilities and performance profiling tools
 ```
 
@@ -62,6 +63,12 @@ cd real-time-voice-cloning
 # Build and run Swift CLI application
 swift build
 swift run
+
+# Run tests
+swift test
+
+# Run benchmarks
+swift run benchmarks
 ```
 
 ## 🗓 Roadmap
@@ -89,3 +96,46 @@ Contributions, suggestions, and optimizations are welcome! Feel free to open iss
 ---
 
 Built with ❤️ for speed, performance, and Apple Silicon native power.
+
+## 🧪 Testing & Benchmarking
+
+### Testing
+
+This project follows a strict separation between functional tests and performance benchmarks:
+
+- **Test Suite**: Focuses exclusively on functional correctness, not performance
+  - Run with `swift test`
+  - Should complete quickly and reliably
+  - No performance assertions or timing-dependent tests
+
+### Benchmarking
+
+A dedicated benchmarking utility is provided for performance measurement:
+
+- **Benchmark Utility**: Comprehensive performance measurement tool
+  - Run with `swift run benchmarks [options]`
+  - Provides detailed statistics (average, standard deviation)
+  - Supports customization via command-line arguments
+
+#### Benchmark Options
+
+```bash
+# Run all benchmarks with default settings
+swift run benchmarks
+
+# Run only critical path benchmarks
+swift run benchmarks --category critical
+
+# Customize iterations and warmup runs
+swift run benchmarks --iterations 10 --warmup 3
+
+# Customize audio parameters
+swift run benchmarks --audio-length 10.0 --fft-size 2048
+```
+
+#### Developer Guidelines
+
+- Always use the benchmarking utility for performance measurements
+- Never add performance-related tests to the main test suite
+- Run benchmarks before and after optimization changes
+- Include benchmark results when submitting performance-related PRs

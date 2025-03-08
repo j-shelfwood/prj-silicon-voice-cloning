@@ -17,6 +17,24 @@
       "name": "Release prj-silicon-voice-cloning",
       "program": "${workspaceFolder:prj-silicon-voice-cloning}/.build/release/prj-silicon-voice-cloning",
       "preLaunchTask": "swift: Build Release prj-silicon-voice-cloning"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:prj-silicon-voice-cloning}",
+      "name": "Debug benchmarks",
+      "program": "${workspaceFolder:prj-silicon-voice-cloning}/.build/debug/benchmarks",
+      "preLaunchTask": "swift: Build Debug benchmarks"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "${workspaceFolder:prj-silicon-voice-cloning}",
+      "name": "Release benchmarks",
+      "program": "${workspaceFolder:prj-silicon-voice-cloning}/.build/release/benchmarks",
+      "preLaunchTask": "swift: Build Release benchmarks"
     }
   ]
 }

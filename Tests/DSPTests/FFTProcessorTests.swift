@@ -63,22 +63,12 @@ final class FFTProcessorTests: DSPBaseTestCase {
     }
 
     func testPerformFFTWithSmallBuffer() {
+        // Test with a buffer smaller than FFT size
         let smallBuffer = [Float](repeating: 0.0, count: fftSize / 2)
         let spectrum = fftProcessor.performFFT(inputBuffer: smallBuffer)
 
-        XCTAssertEqual(spectrum.count, fftSize / 2, "FFT output should have fftSize/2 elements")
-
-        // All values should be zero since we provided insufficient samples
-        for value in spectrum {
-            XCTAssertEqual(value, 0.0, "Spectrum values should be zero for insufficient input")
-        }
-    }
-
-    func testPerformanceOfFFT() {
-        let sineWave = generateTestSignal(duration: 10.0)  // 10 seconds of audio
-
-        measurePerformance { [unowned self] in
-            _ = self.fftProcessor.performFFT(inputBuffer: sineWave)
-        }
+        // Should return an empty array
+        XCTAssertTrue(
+            spectrum.isEmpty, "FFT should return empty array for buffer smaller than FFT size")
     }
 }

@@ -178,16 +178,6 @@ final class ModelInferenceTests: XCTestCase {
         XCTAssertNotNil(waveform, "Audio generation should succeed with correct model type")
     }
 
-    func testModelLoadingPerformance() {
-        // Measure the performance of loading a model
-        measure {
-            for _ in 0..<10 {
-                _ = modelInference.loadModel(
-                    modelPath: "/path/to/model.mlmodel", modelType: .voiceConverter)
-            }
-        }
-    }
-
     // MARK: - Helper methods
 
     private func createTestMelSpectrogram(frames: Int, bands: Int) -> [[Float]] {

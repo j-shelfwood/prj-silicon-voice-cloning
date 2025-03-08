@@ -113,16 +113,6 @@ final class SpectrogramGeneratorTests: DSPBaseTestCase {
         )
     }
 
-    func testPerformanceWithLargeFFTSize() {
-        // Test with a larger FFT size
-        let largeFFTGenerator = SpectrogramGenerator(fftSize: 4096)
-        let sineWave = generateTestSignal(duration: 5.0)
-
-        measurePerformance(iterations: 3) {
-            _ = largeFFTGenerator.generateSpectrogram(inputBuffer: sineWave, hopSize: 1024)
-        }
-    }
-
     func testParallelSpectrogramGeneration() {
         // Create a signal that changes frequency halfway through
         let duration: Float = 2.0  // Longer duration for parallel processing
@@ -181,98 +171,6 @@ final class SpectrogramGeneratorTests: DSPBaseTestCase {
                 maxDifference,
                 0.001,
                 "Sequential and parallel spectrograms should produce similar results"
-            )
-        }
-    }
-
-    func testCompareSequentialAndParallelPerformance() {
-        let sineWave = generateTestSignal(duration: 10.0)
-
-        // Manually time the operations instead of using XCTest's measure
-        var sequentialTimes: [TimeInterval] = []
-        var parallelTimes: [TimeInterval] = []
-
-        // Run multiple iterations
-        for _ in 0..<5 {
-            // Measure sequential
-            let sequentialStart = Date()
-            _ = spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave,
-                hopSize: 256
-            )
-            sequentialTimes.append(-sequentialStart.timeIntervalSinceNow)
-
-            // Measure parallel
-            let parallelStart = Date()
-            _ = spectrogramGenerator.generateSpectrogramParallel(
-                inputBuffer: sineWave,
-                hopSize: 256
-            )
-            parallelTimes.append(-parallelStart.timeIntervalSinceNow)
-        }
-
-        // Calculate averages
-        let sequentialAvg = sequentialTimes.reduce(0, +) / Double(sequentialTimes.count)
-        let parallelAvg = parallelTimes.reduce(0, +) / Double(parallelTimes.count)
-
-        print("Sequential average: \(sequentialAvg) seconds")
-        print("Parallel average: \(parallelAvg) seconds")
-        print("Speedup: \(sequentialAvg / parallelAvg)x")
-
-        // Optional: Assert that parallel is faster
-        XCTAssertLessThan(parallelAvg, sequentialAvg, "Parallel processing should be faster")
-    }
-
-    func testPerformanceOfSequentialSpectrogram() {
-        let sineWave = generateTestSignal(duration: 10.0)
-
-        print("Sequential processing performance:")
-        measurePerformance(iterations: 3) { [unowned self] in
-            _ = self.spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave,
-                hopSize: 256
-            )
-        }
-    }
-
-    func testPerformanceOfParallelSpectrogram() {
-        let sineWave = generateTestSignal(duration: 10.0)
-
-        print("Parallel processing performance:")
-        measurePerformance(iterations: 3) { [unowned self] in
-            _ = self.spectrogramGenerator.generateSpectrogramParallel(
-                inputBuffer: sineWave,
-                hopSize: 256
-            )
-        }
-    }
-
-    func testPerformanceOfSpectrogramWithHopSize128() {
-        let sineWave = generateTestSignal(duration: 10.0)
-        measurePerformance(iterations: 5) { [unowned self] in
-            _ = self.spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave,
-                hopSize: 128
-            )
-        }
-    }
-
-    func testPerformanceOfSpectrogramWithHopSize256() {
-        let sineWave = generateTestSignal(duration: 10.0)
-        measurePerformance(iterations: 5) { [unowned self] in
-            _ = self.spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave,
-                hopSize: 256
-            )
-        }
-    }
-
-    func testPerformanceOfSpectrogramWithHopSize512() {
-        let sineWave = generateTestSignal(duration: 10.0)
-        measurePerformance(iterations: 5) { [unowned self] in
-            _ = self.spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave,
-                hopSize: 512
             )
         }
     }
