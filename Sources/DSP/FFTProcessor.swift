@@ -1,6 +1,7 @@
 import Accelerate
 import Foundation
 import Utilities
+import os.lock
 
 /// A class dedicated to performing Fast Fourier Transform (FFT) operations on audio signals.
 /// Uses Apple's Accelerate framework for high-performance FFT computation.
@@ -8,6 +9,20 @@ public class FFTProcessor {
     private var fftSetup: vDSP.FFT<DSPSplitComplex>?
     private var fftSize: Int
     private var windowBuffer: [Float]
+
+    // Pre-allocated buffers for FFT operations
+    private var realBuffer: [Float]
+    private var imagBuffer: [Float]
+    private var magnitudeBuffer: [Float]
+    private var dbMagnitudeBuffer: [Float]
+
+    // Thread safety
+    private var bufferLock = os_unfair_lock()
+
+    // Cache for FFT results
+    private var resultCache: [String: [Float]] = [:]
+    private var cacheMaxSize = 10
+    private var cacheLock = os_unfair_lock()
 
     /**
      Initialize a new FFTProcessor instance with the specified FFT size.
@@ -24,8 +39,54 @@ public class FFTProcessor {
         let log2n = vDSP_Length(log2(Double(fftSize)))
         self.fftSetup = vDSP.FFT(log2n: log2n, radix: .radix2, ofType: DSPSplitComplex.self)
 
+        // Pre-allocate buffers
+        let halfSize = fftSize / 2
+        self.realBuffer = [Float](repeating: 0.0, count: halfSize)
+        self.imagBuffer = [Float](repeating: 0.0, count: halfSize)
+        self.magnitudeBuffer = [Float](repeating: 0.0, count: halfSize)
+        self.dbMagnitudeBuffer = [Float](repeating: 0.0, count: halfSize)
+
         // Use print instead of Utilities.log to avoid MainActor requirement
         print("FFTProcessor initialized with FFT size: \(fftSize)")
+    }
+
+    /**
+     Generate a hash key for caching based on input buffer
+     */
+    private func cacheKey(inputBuffer: [Float]) -> String {
+        // Use first few samples and length as a simple hash
+        let sampleCount = min(10, inputBuffer.count)
+        var samples = ""
+        for i in 0..<sampleCount {
+            samples += String(format: "%.2f", inputBuffer[i])
+        }
+        return "\(samples)_\(inputBuffer.count)"
+    }
+
+    /**
+     Check if result is in cache
+     */
+    private func getCachedResult(key: String) -> [Float]? {
+        os_unfair_lock_lock(&cacheLock)
+        defer { os_unfair_lock_unlock(&cacheLock) }
+
+        return resultCache[key]
+    }
+
+    /**
+     Store result in cache
+     */
+    private func cacheResult(key: String, result: [Float]) {
+        os_unfair_lock_lock(&cacheLock)
+        defer { os_unfair_lock_unlock(&cacheLock) }
+
+        // If cache is full, remove oldest entry
+        if resultCache.count >= cacheMaxSize {
+            let firstKey = resultCache.keys.first ?? ""
+            resultCache.removeValue(forKey: firstKey)
+        }
+
+        resultCache[key] = result
     }
 
     /**
@@ -44,6 +105,12 @@ public class FFTProcessor {
             return []
         }
 
+        // Check cache first
+        let key = cacheKey(inputBuffer: inputBuffer)
+        if let cachedResult = getCachedResult(key: key) {
+            return cachedResult
+        }
+
         // Create a copy of the input buffer to avoid modifying the original
         var inputCopy = Array(inputBuffer.prefix(fftSize))
 
@@ -52,12 +119,21 @@ public class FFTProcessor {
 
         // Prepare split complex buffer for FFT
         let halfSize = fftSize / 2
-        var realp = [Float](repeating: 0.0, count: halfSize)
-        var imagp = [Float](repeating: 0.0, count: halfSize)
+
+        // Acquire lock for shared buffers
+        os_unfair_lock_lock(&bufferLock)
+
+        // Create local copies of the pre-allocated buffers
+        var localRealBuffer = realBuffer
+        var localImagBuffer = imagBuffer
+        var localMagnitudeBuffer = magnitudeBuffer
+        var localDbMagnitudeBuffer = dbMagnitudeBuffer
+
+        os_unfair_lock_unlock(&bufferLock)
 
         // Safely use pointers with withUnsafeMutableBufferPointer
-        return realp.withUnsafeMutableBufferPointer { realPtr in
-            imagp.withUnsafeMutableBufferPointer { imagPtr in
+        return localRealBuffer.withUnsafeMutableBufferPointer { realPtr in
+            localImagBuffer.withUnsafeMutableBufferPointer { imagPtr in
                 // Create split complex with safe pointers
                 var splitComplex = DSPSplitComplex(
                     realp: realPtr.baseAddress!,
@@ -81,20 +157,27 @@ public class FFTProcessor {
                 fftSetup.forward(input: splitComplex, output: &splitComplex)
 
                 // Calculate magnitude spectrum
-                var magnitudes = [Float](repeating: 0.0, count: halfSize)
-                vDSP_zvmags(&splitComplex, 1, &magnitudes, 1, vDSP_Length(halfSize))
+                vDSP_zvmags(&splitComplex, 1, &localMagnitudeBuffer, 1, vDSP_Length(halfSize))
 
                 // Scale magnitudes
                 var scaleFactor = Float(1.0) / Float(fftSize)
-                vDSP_vsmul(magnitudes, 1, &scaleFactor, &magnitudes, 1, vDSP_Length(halfSize))
+                vDSP_vsmul(
+                    localMagnitudeBuffer, 1, &scaleFactor, &localMagnitudeBuffer, 1,
+                    vDSP_Length(halfSize))
 
                 // Convert to dB scale
-                var dbMagnitudes = [Float](repeating: 0.0, count: halfSize)
                 var zeroReference: Float = 1.0
                 vDSP_vdbcon(
-                    magnitudes, 1, &zeroReference, &dbMagnitudes, 1, vDSP_Length(halfSize), 1)
+                    localMagnitudeBuffer, 1, &zeroReference, &localDbMagnitudeBuffer, 1,
+                    vDSP_Length(halfSize), 1)
 
-                return dbMagnitudes
+                // Create a copy of the result to return
+                let result = Array(localDbMagnitudeBuffer)
+
+                // Cache the result
+                cacheResult(key: key, result: result)
+
+                return result
             }
         }
     }

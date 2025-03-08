@@ -1,18 +1,28 @@
 import Foundation
+import os.lock
 
 /// Utility functions for timing operations in the voice cloning system.
 public class TimerUtility {
     /// Dictionary to store timer start times
-    @MainActor
-    private static var timers: [String: CFAbsoluteTime] = [:]
+    nonisolated(unsafe) private static var timers: [String: CFAbsoluteTime] = [:]
+
+    /// Lock for thread safety
+    nonisolated(unsafe) private static var timerLock = os_unfair_lock()
+
+    /// Cache for frequently used timers
+    nonisolated(unsafe) private static var timerCache: [String: Double] = [:]
+    nonisolated(unsafe) private static var cacheDuration: TimeInterval = 0.1  // Cache duration in seconds
+    nonisolated(unsafe) private static var cacheTimestamps: [String: TimeInterval] = [:]
 
     /**
      Start a timer with the given ID
 
      - Parameter id: Unique identifier for this timer
      */
-    @MainActor
     public static func startTimer(id: String) {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
         timers[id] = CFAbsoluteTimeGetCurrent()
     }
 
@@ -22,8 +32,10 @@ public class TimerUtility {
      - Parameter id: Identifier of the timer to end
      - Returns: Elapsed time in milliseconds
      */
-    @MainActor
     public static func endTimer(id: String) -> Double {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
         guard let startTime = timers[id] else {
             print("Warning: Timer with ID '\(id)' doesn't exist")
             return 0
@@ -31,9 +43,36 @@ public class TimerUtility {
 
         let endTime = CFAbsoluteTimeGetCurrent()
         let elapsedTime = (endTime - startTime) * 1000
+
+        // Cache the result
+        timerCache[id] = elapsedTime
+        cacheTimestamps[id] = endTime
+
+        // Remove the timer
         timers.removeValue(forKey: id)
 
         return elapsedTime
+    }
+
+    /**
+     Get the last measured time for a timer without restarting it
+
+     - Parameter id: Identifier of the timer to check
+     - Returns: Last measured time in milliseconds, or nil if not available
+     */
+    public static func getLastMeasuredTime(id: String) -> Double? {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
+        // Check if we have a cached result
+        if let cachedTime = timerCache[id],
+            let timestamp = cacheTimestamps[id],
+            CFAbsoluteTimeGetCurrent() - timestamp < cacheDuration
+        {
+            return cachedTime
+        }
+
+        return nil
     }
 
     /**
@@ -42,8 +81,10 @@ public class TimerUtility {
      - Parameter id: Identifier of the timer to check
      - Returns: Boolean indicating whether the timer exists
      */
-    @MainActor
     public static func timerExists(id: String) -> Bool {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
         return timers[id] != nil
     }
 
@@ -52,16 +93,34 @@ public class TimerUtility {
 
      - Returns: Array of active timer IDs
      */
-    @MainActor
     public static func activeTimers() -> [String] {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
         return Array(timers.keys)
     }
 
     /**
      Reset all timers
      */
-    @MainActor
     public static func resetAllTimers() {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
         timers.removeAll()
+        timerCache.removeAll()
+        cacheTimestamps.removeAll()
+    }
+
+    /**
+     Set the cache duration for timer results
+
+     - Parameter duration: Duration in seconds
+     */
+    public static func setCacheDuration(duration: TimeInterval) {
+        os_unfair_lock_lock(&timerLock)
+        defer { os_unfair_lock_unlock(&timerLock) }
+
+        cacheDuration = duration
     }
 }

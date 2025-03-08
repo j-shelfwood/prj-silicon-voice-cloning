@@ -1,154 +1,276 @@
+import Accelerate
 import Foundation
 import Utilities
+import os.lock
 
 /// A class for processing audio in real-time chunks to produce mel-spectrograms.
 /// This is optimized for streaming use cases where audio arrives in small buffers.
 public class StreamingMelProcessor {
-    private let spectrogramGenerator: SpectrogramGenerator
-    private let melConverter: MelSpectrogramConverter
+    // Configuration parameters
+    private let fftSize: Int
     private let hopSize: Int
     private let sampleRate: Float
     private let melBands: Int
+    private let minFrequency: Float
+    private let maxFrequency: Float
 
-    // Buffer to store audio samples that haven't been processed yet
+    // Processing components
+    private let fftProcessor: FFTProcessor
+    private let melConverter: MelSpectrogramConverter
+
+    // Audio buffer
     private var audioBuffer: [Float] = []
-    // The maximum number of samples to keep in the buffer
-    private var maxBufferSize: Int
+    private var bufferLock = os_unfair_lock()
+
+    // Caching for performance
+    private var melCache: [String: [[Float]]] = [:]
+    private var logMelCache: [String: [[Float]]] = [:]
+    private var cacheLock = os_unfair_lock()
+
+    // Maximum buffer size to prevent memory issues
+    private let maxBufferSize = 1_000_000  // ~23 seconds at 44.1kHz
 
     /**
-     Initialize a new StreamingMelProcessor
+     Initialize a new StreamingMelProcessor.
 
      - Parameters:
-        - fftSize: Size of the FFT to perform
-        - hopSize: Number of samples to advance between FFT windows
-        - sampleRate: Audio sample rate in Hz
-        - melBands: Number of mel bands for the mel spectrogram
-        - minFrequency: Minimum frequency in Hz for mel scale
-        - maxFrequency: Maximum frequency in Hz for mel scale
+        - fftSize: Size of the FFT window
+        - hopSize: Hop size between frames
+        - sampleRate: Sample rate of the audio
+        - melBands: Number of mel bands
+        - minFrequency: Minimum frequency for mel bands
+        - maxFrequency: Maximum frequency for mel bands
      */
     public init(
         fftSize: Int = 1024,
-        hopSize: Int? = nil,
-        sampleRate: Float = 44100.0,
-        melBands: Int = 40,
-        minFrequency: Float = 0.0,
-        maxFrequency: Float = 8000.0
+        hopSize: Int = 256,
+        sampleRate: Float = 44100,
+        melBands: Int = 80,
+        minFrequency: Float = 0,
+        maxFrequency: Float = 8000
     ) {
-        self.spectrogramGenerator = SpectrogramGenerator(
-            fftSize: fftSize, hopSize: hopSize ?? (fftSize / 2))
+        self.fftSize = fftSize
+        self.hopSize = hopSize
+        self.sampleRate = sampleRate
+        self.melBands = melBands
+        self.minFrequency = minFrequency
+        self.maxFrequency = maxFrequency
+
+        self.fftProcessor = FFTProcessor(fftSize: fftSize)
         self.melConverter = MelSpectrogramConverter(
             sampleRate: sampleRate,
             melBands: melBands,
             minFrequency: minFrequency,
             maxFrequency: maxFrequency
         )
-        self.hopSize = hopSize ?? (fftSize / 2)
-        self.sampleRate = sampleRate
-        self.melBands = melBands
-
-        // Keep enough samples for at least 2 FFT windows to ensure smooth processing
-        self.maxBufferSize = fftSize * 3
-
-        // Use print instead of Utilities.log to avoid MainActor requirement
-        print(
-            "StreamingMelProcessor initialized with FFT size: \(fftSize), hop size: \(self.hopSize)"
-        )
     }
 
     /**
-     Process a chunk of audio samples and update the internal buffer
+     Add new audio samples to the buffer.
 
-     - Parameter samples: New audio samples to process
+     - Parameter samples: New audio samples to add
      */
     public func addSamples(_ samples: [Float]) {
-        // Add new samples to the buffer
+        os_unfair_lock_lock(&bufferLock)
+        defer { os_unfair_lock_unlock(&bufferLock) }
+
         audioBuffer.append(contentsOf: samples)
 
         // Trim buffer if it gets too large
         if audioBuffer.count > maxBufferSize {
             audioBuffer.removeFirst(audioBuffer.count - maxBufferSize)
         }
+
+        // Clear caches when new samples are added
+        os_unfair_lock_lock(&cacheLock)
+        melCache.removeAll()
+        logMelCache.removeAll()
+        os_unfair_lock_unlock(&cacheLock)
     }
 
     /**
-     Process the current audio buffer and generate mel-spectrogram frames
+     Generate a cache key for the current state.
 
-     - Parameter minFrames: Minimum number of frames to generate (or nil to process all available)
-     - Returns: Array of mel-spectrogram frames and the number of samples consumed
+     - Parameter frameCount: Number of frames to process
+     - Returns: A unique cache key
      */
-    public func processMelSpectrogram(minFrames: Int? = nil) -> (
-        melFrames: [[Float]], samplesConsumed: Int
-    ) {
-        // Check if we have enough samples for at least one FFT window
-        guard audioBuffer.count >= spectrogramGenerator.fftSize else {
-            return ([], 0)
+    private func cacheKey(frameCount: Int) -> String {
+        return "frames_\(frameCount)_buffer_\(audioBuffer.count)"
+    }
+
+    /**
+     Process audio buffer to generate mel spectrogram frames.
+
+     - Parameter frameCount: Number of frames to generate
+     - Returns: Array of mel spectrogram frames
+     */
+    public func processMelSpectrogram(frameCount: Int) -> [[Float]] {
+        // Check cache first
+        let key = cacheKey(frameCount: frameCount)
+
+        os_unfair_lock_lock(&cacheLock)
+        if let cached = melCache[key] {
+            os_unfair_lock_unlock(&cacheLock)
+            return cached
+        }
+        os_unfair_lock_unlock(&cacheLock)
+
+        // Lock buffer for reading
+        os_unfair_lock_lock(&bufferLock)
+        let buffer = audioBuffer
+        os_unfair_lock_unlock(&bufferLock)
+
+        // Check if we have enough samples
+        let samplesNeeded = fftSize + (frameCount - 1) * hopSize
+        guard buffer.count >= samplesNeeded else {
+            return []
         }
 
-        // Calculate how many complete frames we can process
-        let availableFrames = (audioBuffer.count - spectrogramGenerator.fftSize) / hopSize + 1
+        // Process frames
+        var spectrogram: [[Float]] = []
 
-        // Determine how many frames to actually process
-        let framesToProcess = minFrames != nil ? min(availableFrames, minFrames!) : availableFrames
+        for i in 0..<frameCount {
+            let startIdx = buffer.count - samplesNeeded + i * hopSize
+            let endIdx = startIdx + fftSize
 
-        // If no frames to process, return empty
-        if framesToProcess <= 0 {
-            return ([], 0)
+            if startIdx >= 0 && endIdx <= buffer.count {
+                let frame = Array(buffer[startIdx..<endIdx])
+                let spectrum = fftProcessor.performFFT(inputBuffer: frame)
+                spectrogram.append(spectrum)
+            }
         }
-
-        // Calculate how many samples will be consumed
-        let samplesToConsume = (framesToProcess - 1) * hopSize + spectrogramGenerator.fftSize
-
-        // Generate spectrogram from the buffer
-        let spectrogram = spectrogramGenerator.generateSpectrogram(
-            inputBuffer: Array(audioBuffer.prefix(samplesToConsume)),
-            hopSize: hopSize
-        )
 
         // Convert to mel spectrogram
         let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
 
-        // Remove the consumed samples from the buffer
-        if samplesToConsume > 0 {
-            audioBuffer.removeFirst(samplesToConsume)
-        }
+        // Cache the result
+        os_unfair_lock_lock(&cacheLock)
+        melCache[key] = melSpectrogram
+        os_unfair_lock_unlock(&cacheLock)
 
-        return (melSpectrogram, samplesToConsume)
+        return melSpectrogram
     }
 
     /**
-     Process the current audio buffer and generate log-mel-spectrogram frames
+     Process audio buffer to generate mel spectrogram frames.
 
-     - Parameter minFrames: Minimum number of frames to generate (or nil to process all available)
-     - Returns: Array of log-mel-spectrogram frames and the number of samples consumed
+     - Returns: Tuple containing mel spectrogram frames and number of samples consumed
      */
-    public func processLogMelSpectrogram(minFrames: Int? = nil) -> (
-        logMelFrames: [[Float]], samplesConsumed: Int
-    ) {
-        let (melFrames, samplesConsumed) = processMelSpectrogram(minFrames: minFrames)
+    public func processMelSpectrogram() -> ([[Float]], Int) {
+        // Determine how many frames we can process
+        os_unfair_lock_lock(&bufferLock)
+        let bufferSize = audioBuffer.count
+        os_unfair_lock_unlock(&bufferLock)
 
-        if melFrames.isEmpty {
-            return ([], samplesConsumed)
+        if bufferSize < fftSize {
+            return ([], 0)
         }
 
-        // Convert to log-mel spectrogram
-        let logMelFrames = melConverter.melToLogMel(melSpectrogram: melFrames)
+        let frameCount = (bufferSize - fftSize) / hopSize + 1
+        let melSpectrogram = processMelSpectrogram(frameCount: frameCount)
+        let samplesConsumed = frameCount > 0 ? fftSize + (frameCount - 1) * hopSize : 0
 
-        return (logMelFrames, samplesConsumed)
+        return (melSpectrogram, samplesConsumed)
     }
 
     /**
-     Reset the internal audio buffer
+     Process audio buffer to generate mel spectrogram frames with minimum frame count.
+
+     - Parameter minFrames: Minimum number of frames to generate
+     - Returns: Tuple containing mel spectrogram frames and number of samples consumed
+     */
+    public func processMelSpectrogram(minFrames: Int) -> ([[Float]], Int) {
+        let melSpectrogram = processMelSpectrogram(frameCount: minFrames)
+        let samplesConsumed =
+            melSpectrogram.count > 0 ? fftSize + (melSpectrogram.count - 1) * hopSize : 0
+
+        return (melSpectrogram, samplesConsumed)
+    }
+
+    /**
+     Process audio buffer to generate log-mel spectrogram frames.
+
+     - Parameters:
+        - frameCount: Number of frames to generate
+        - ref: Reference value for log scaling
+        - minLevel: Minimum level for clipping
+     - Returns: Array of log-mel spectrogram frames
+     */
+    public func processLogMelSpectrogram(
+        frameCount: Int,
+        ref: Float = 1.0,
+        minLevel: Float = 1e-5
+    ) -> [[Float]] {
+        // Check cache first
+        let key = "\(cacheKey(frameCount: frameCount))_ref_\(ref)_min_\(minLevel)"
+
+        os_unfair_lock_lock(&cacheLock)
+        if let cached = logMelCache[key] {
+            os_unfair_lock_unlock(&cacheLock)
+            return cached
+        }
+        os_unfair_lock_unlock(&cacheLock)
+
+        // Get mel spectrogram
+        let melFrames = processMelSpectrogram(frameCount: frameCount)
+
+        // Convert to log scale
+        let logMelFrames = melConverter.melToLogMel(
+            melSpectrogram: melFrames, ref: ref, floor: minLevel)
+
+        // Cache the result
+        os_unfair_lock_lock(&cacheLock)
+        logMelCache[key] = logMelFrames
+        os_unfair_lock_unlock(&cacheLock)
+
+        return logMelFrames
+    }
+
+    /**
+     Process audio buffer to generate log-mel spectrogram frames.
+
+     - Returns: Tuple containing log-mel spectrogram frames and number of samples consumed
+     */
+    public func processLogMelSpectrogram() -> ([[Float]], Int) {
+        // Determine how many frames we can process
+        os_unfair_lock_lock(&bufferLock)
+        let bufferSize = audioBuffer.count
+        os_unfair_lock_unlock(&bufferLock)
+
+        if bufferSize < fftSize {
+            return ([], 0)
+        }
+
+        let frameCount = (bufferSize - fftSize) / hopSize + 1
+        let logMelSpectrogram = processLogMelSpectrogram(frameCount: frameCount)
+        let samplesConsumed = frameCount > 0 ? fftSize + (frameCount - 1) * hopSize : 0
+
+        return (logMelSpectrogram, samplesConsumed)
+    }
+
+    /**
+     Reset the processor by clearing the audio buffer and caches.
      */
     public func reset() {
+        os_unfair_lock_lock(&bufferLock)
         audioBuffer.removeAll()
+        os_unfair_lock_unlock(&bufferLock)
+
+        os_unfair_lock_lock(&cacheLock)
+        melCache.removeAll()
+        logMelCache.removeAll()
+        os_unfair_lock_unlock(&cacheLock)
     }
 
     /**
-     Get the current buffer length in samples
+     Get the current buffer length.
 
      - Returns: Number of samples in the buffer
      */
     public func getBufferLength() -> Int {
+        os_unfair_lock_lock(&bufferLock)
+        defer { os_unfair_lock_unlock(&bufferLock) }
+
         return audioBuffer.count
     }
 }

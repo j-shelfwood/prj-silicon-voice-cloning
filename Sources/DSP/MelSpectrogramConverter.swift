@@ -1,6 +1,7 @@
 import Accelerate
 import Foundation
 import Utilities
+import os.lock
 
 /// A class for converting linear frequency spectrograms to mel-scale spectrograms.
 /// This class handles the creation and application of mel filterbanks for audio analysis.
@@ -16,6 +17,18 @@ public class MelSpectrogramConverter {
     private var flatFilterbank: [Float]?
     private var filterBankStrides: [Int]?
     private var lastSpectrogramWidth: Int?
+
+    // Pre-allocated buffers for processing
+    private var processedBuffer: [Float]?
+    private var resultBuffer: [Float]?
+
+    // Thread safety
+    private var filterBankLock = os_unfair_lock()
+
+    // Cache for results
+    private var resultCache: [String: [[Float]]] = [:]
+    private var cacheMaxSize = 5
+    private var cacheLock = os_unfair_lock()
 
     /**
      Initialize a new MelSpectrogramConverter instance.
@@ -42,6 +55,58 @@ public class MelSpectrogramConverter {
     }
 
     /**
+     Generate a hash key for caching based on input parameters
+     */
+    private func cacheKey(spectrogram: [[Float]], operation: String) -> String {
+        guard !spectrogram.isEmpty else { return "" }
+
+        // Use dimensions and a sample of values as the key
+        let rows = spectrogram.count
+        let cols = spectrogram[0].count
+
+        // Sample a few values from the spectrogram
+        var samples = ""
+        let sampleRows = min(3, rows)
+        let sampleCols = min(3, cols)
+
+        for i in 0..<sampleRows {
+            let rowIndex = (i * rows) / sampleRows
+            for j in 0..<sampleCols {
+                let colIndex = (j * cols) / sampleCols
+                samples += String(format: "%.2f", spectrogram[rowIndex][colIndex])
+            }
+        }
+
+        return "\(operation)_\(rows)_\(cols)_\(samples)"
+    }
+
+    /**
+     Check if result is in cache
+     */
+    private func getCachedResult(key: String) -> [[Float]]? {
+        os_unfair_lock_lock(&cacheLock)
+        defer { os_unfair_lock_unlock(&cacheLock) }
+
+        return resultCache[key]
+    }
+
+    /**
+     Store result in cache
+     */
+    private func cacheResult(key: String, result: [[Float]]) {
+        os_unfair_lock_lock(&cacheLock)
+        defer { os_unfair_lock_unlock(&cacheLock) }
+
+        // If cache is full, remove oldest entry
+        if resultCache.count >= cacheMaxSize {
+            let firstKey = resultCache.keys.first ?? ""
+            resultCache.removeValue(forKey: firstKey)
+        }
+
+        resultCache[key] = result
+    }
+
+    /**
      Convert spectrogram to mel-spectrogram using mel filterbank.
 
      - Parameter spectrogram: Linear frequency spectrogram
@@ -53,9 +118,16 @@ public class MelSpectrogramConverter {
             return []
         }
 
+        // Check cache first
+        let key = cacheKey(spectrogram: spectrogram, operation: "mel")
+        if let cachedResult = getCachedResult(key: key) {
+            return cachedResult
+        }
+
         let numFrames = spectrogram.count
         let numFreqBins = spectrogram[0].count
 
+        os_unfair_lock_lock(&filterBankLock)
         // Create or update mel filterbank if needed
         if melFilterbank == nil || lastSpectrogramWidth != numFreqBins {
             melFilterbank = createMelFilterbank(fftSize: numFreqBins * 2)
@@ -66,16 +138,22 @@ public class MelSpectrogramConverter {
                 // Flatten the filterbank for vectorized operations
                 flatFilterbank = fb.flatMap { $0 }
                 filterBankStrides = Array(repeating: numFreqBins, count: melBands)
+
+                // Pre-allocate buffers
+                processedBuffer = [Float](repeating: 0.0, count: numFreqBins)
+                resultBuffer = [Float](repeating: 0.0, count: melBands)
             }
         }
 
-        guard melFilterbank != nil,
-            let flatFB = flatFilterbank,
-            filterBankStrides != nil
+        guard let flatFB = flatFilterbank,
+            let processedBuf = processedBuffer,
+            let resultBuf = resultBuffer
         else {
+            os_unfair_lock_unlock(&filterBankLock)
             print("Error: Failed to create mel filterbank")
             return []
         }
+        os_unfair_lock_unlock(&filterBankLock)
 
         var melSpectrogram = [[Float]](
             repeating: [Float](repeating: 0.0, count: melBands), count: numFrames)
@@ -88,42 +166,42 @@ public class MelSpectrogramConverter {
             let frameStart = i * numFreqBins
             let frame = Array(flatSpectrogram[frameStart..<frameStart + numFreqBins])
 
+            // Create a local copy of the pre-allocated buffers
+            var localProcessedBuffer = processedBuf
+            var localResultBuffer = resultBuf
+
             // Add small epsilon to avoid zero values and ensure positive values
-            var processedFrame = [Float](repeating: 0.0, count: frame.count)
             var epsilon: Float = 1e-10
             var maxPossible: Float = Float.greatestFiniteMagnitude
 
             // First ensure all values are positive
             vDSP_vclip(
-                frame, 1, &epsilon, &maxPossible, &processedFrame, 1, vDSP_Length(frame.count))
-
-            // Create mutable array for the frame result
-            var frameResult = [Float](repeating: 0.0, count: melBands)
+                frame, 1, &epsilon, &maxPossible, &localProcessedBuffer, 1, vDSP_Length(frame.count)
+            )
 
             // Perform matrix multiplication using vDSP
-            frameResult.withUnsafeMutableBufferPointer { resultPtr in
-                processedFrame.withUnsafeBufferPointer { framePtr in
-                    vDSP_mmul(
-                        flatFB,  // Matrix A (filterbank)
-                        1,  // A row stride
-                        framePtr.baseAddress!,  // Matrix B (spectrogram frame)
-                        1,  // B row stride
-                        resultPtr.baseAddress!,  // Result matrix C
-                        1,  // C row stride
-                        vDSP_Length(melBands),  // Number of rows in A and C
-                        1,  // Number of columns in B and C
-                        vDSP_Length(numFreqBins)  // Number of columns in A and rows in B
-                    )
-                }
-            }
+            vDSP_mmul(
+                flatFB,  // Matrix A (filterbank)
+                1,  // A row stride
+                localProcessedBuffer,  // Matrix B (spectrogram frame)
+                1,  // B row stride
+                &localResultBuffer,  // Result matrix C
+                1,  // C row stride
+                vDSP_Length(melBands),  // Number of rows in A and C
+                1,  // Number of columns in B and C
+                vDSP_Length(numFreqBins)  // Number of columns in A and rows in B
+            )
 
             // Ensure non-negative values and add small epsilon
-            var clippedResult = frameResult
             vDSP_vclip(
-                &frameResult, 1, &epsilon, &maxPossible, &clippedResult, 1, vDSP_Length(melBands))
+                localResultBuffer, 1, &epsilon, &maxPossible, &localResultBuffer, 1,
+                vDSP_Length(melBands))
 
-            melSpectrogram[i] = clippedResult
+            melSpectrogram[i] = localResultBuffer
         }
+
+        // Cache the result
+        cacheResult(key: key, result: melSpectrogram)
 
         return melSpectrogram
     }
@@ -143,6 +221,12 @@ public class MelSpectrogramConverter {
         guard !melSpectrogram.isEmpty else {
             print("Error: Empty mel-spectrogram provided to melToLogMel")
             return []
+        }
+
+        // Check cache first
+        let key = cacheKey(spectrogram: melSpectrogram, operation: "logmel")
+        if let cachedResult = getCachedResult(key: key) {
+            return cachedResult
         }
 
         let numFrames = melSpectrogram.count
@@ -183,12 +267,17 @@ public class MelSpectrogramConverter {
         // Clip to dB range
         vDSP_vclip(logMelFlat, 1, &minDb, &maxDb, &logMelFlat, 1, vDSP_Length(flatMel.count))
 
-        // Reshape back to 2D array
-        var logMelSpectrogram = [[Float]](repeating: [], count: numFrames)
+        // Reshape back to 2D array using pre-allocated memory
+        var logMelSpectrogram = [[Float]](
+            repeating: [Float](repeating: 0.0, count: numBands), count: numFrames)
+
         for i in 0..<numFrames {
             let start = i * numBands
             logMelSpectrogram[i] = Array(logMelFlat[start..<start + numBands])
         }
+
+        // Cache the result
+        cacheResult(key: key, result: logMelSpectrogram)
 
         return logMelSpectrogram
     }
@@ -251,41 +340,33 @@ public class MelSpectrogramConverter {
         var filterbank = [[Float]](
             repeating: [Float](repeating: 0.0, count: numBins), count: melBands)
 
+        // For each mel band
         for i in 0..<melBands {
-            let leftBin = binPoints[i]
-            let centerBin = binPoints[i + 1]
-            let rightBin = binPoints[i + 2]
-
-            // Skip if bins are too close (would create unstable filters)
-            if rightBin - leftBin < 2 {
-                print(
-                    "Warning: Mel filter \(i) has too narrow bandwidth. Consider using fewer mel bands."
-                )
-                continue
-            }
-
-            // Create triangular filter
-            for j in leftBin...rightBin {
-                if j < numBins && j >= 0 {
-                    if j < centerBin {
-                        // Left side of triangle
-                        if centerBin > leftBin {
-                            filterbank[i][j] = Float(j - leftBin) / Float(centerBin - leftBin)
-                        }
-                    } else {
-                        // Right side of triangle
-                        if rightBin > centerBin {
-                            filterbank[i][j] = Float(rightBin - j) / Float(rightBin - centerBin)
-                        }
-                    }
+            // For each FFT bin
+            for j in 0..<numBins {
+                // Lower and upper slopes
+                if j > binPoints[i] && j < binPoints[i + 1] {
+                    // Lower slope
+                    filterbank[i][j] =
+                        Float(j - binPoints[i]) / Float(binPoints[i + 1] - binPoints[i])
+                } else if j > binPoints[i + 1] && j < binPoints[i + 2] {
+                    // Upper slope
+                    filterbank[i][j] =
+                        Float(binPoints[i + 2] - j) / Float(binPoints[i + 2] - binPoints[i + 1])
                 }
             }
 
-            // Normalize the filter to have unit area (optional but recommended)
-            let filterSum = filterbank[i].reduce(0, +)
-            if filterSum > 0 {
+            // Normalize the filterbank row to ensure area under the triangle is 1
+            var rowSum: Float = 0.0
+            vDSP_sve(filterbank[i], 1, &rowSum, vDSP_Length(numBins))
+
+            if rowSum > 0.0 {
+                // Use a temporary scalar for the reciprocal
+                let recipRowSum = 1.0 / rowSum
+
+                // Apply normalization to each element in the row
                 for j in 0..<numBins {
-                    filterbank[i][j] /= filterSum
+                    filterbank[i][j] *= recipRowSum
                 }
             }
         }
