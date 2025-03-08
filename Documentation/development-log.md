@@ -620,3 +620,81 @@ swift run benchmarks --audio-length 10.0 --fft-size 2048 --hop-size 512
    - Identify and address performance bottlenecks in the DSP and ML pipelines
 
 The codebase is now more maintainable, with better separation of concerns and improved concurrency safety. The test suite runs faster and focuses on correctness rather than performance, while the dedicated benchmarking utility provides comprehensive performance measurements.
+
+## 2025-03-09: Logging System Improvements and CLI Output Refinement
+
+### Progress Summary
+
+- Implemented a proper logging system with configurable log levels
+- Removed direct print statements from library code
+- Enhanced CLI output with structured logging
+- Fixed variable mutability issues in command implementations
+- Improved code maintainability and reusability
+
+### Technical Details & Learnings
+
+#### Logging System Implementation
+
+- Created a dedicated `LoggerUtility` class with multiple log levels:
+  - DEBUG: Detailed information for development and troubleshooting
+  - INFO: General operational information
+  - WARNING: Potential issues that don't prevent execution
+  - ERROR: Critical issues that may cause failures
+- Added timestamp formatting to log messages for better debugging
+- Implemented global log level configuration to control verbosity
+- Ensured thread safety for logging operations
+
+#### Library Code Cleanup
+
+- Removed all direct `print()` statements from library code:
+  - Replaced print calls in `MockAudioProcessor` with `LoggerUtility.debug()`
+  - Updated `DSP.swift` to use proper logging instead of print
+  - Fixed `FFTProcessor.swift` to use the logging system
+- Added configuration options to control logging behavior:
+  - `enableLogging` flag in `MockAudioProcessor.MockConfig`
+  - Global log level setting in `LoggerUtility`
+- Benefits:
+  - Better separation of concerns
+  - Improved code reusability
+  - More consistent user experience
+  - Enhanced debugging capabilities
+
+#### CLI Interface Refinement
+
+- Updated `CommandRouter.swift` to use the logging system
+- Fixed variable mutability issues:
+  - Changed `var mutableAudioProcessor` to `let` where appropriate
+  - Ensured proper immutability for non-modified properties
+- Enhanced command output with proper log levels
+- Configured logging in `main.swift` to set appropriate verbosity
+
+#### Code Quality Improvements
+
+- Reduced warnings in the codebase:
+  - Fixed unused variable warnings
+  - Addressed immutable value warnings
+  - Corrected variable declaration issues
+- Improved build time and reliability
+- Enhanced code readability and maintainability
+
+### Next Steps
+
+1. **Complete Logging Integration**:
+   - Add file-based logging for persistent records
+   - Implement log filtering by category
+   - Add log rotation for long-running applications
+
+2. **CLI Enhancement**:
+   - Add verbosity control via command-line arguments
+   - Implement progress indicators for long-running operations
+   - Add color-coded output for different log levels
+
+3. **Error Handling Improvements**:
+   - Create a comprehensive error handling strategy
+   - Implement proper error propagation through the system
+   - Add user-friendly error messages for common issues
+
+4. **Documentation Updates**:
+   - Document logging best practices
+   - Update API documentation with logging examples
+   - Create developer guidelines for error handling

@@ -46,8 +46,8 @@ public class FFTProcessor {
         self.magnitudeBuffer = [Float](repeating: 0.0, count: halfSize)
         self.dbMagnitudeBuffer = [Float](repeating: 0.0, count: halfSize)
 
-        // Use print instead of Utilities.log to avoid MainActor requirement
-        print("FFTProcessor initialized with FFT size: \(fftSize)")
+        // Log initialization
+        LoggerUtility.debug("FFTProcessor initialized with FFT size: \(fftSize)")
     }
 
     /**

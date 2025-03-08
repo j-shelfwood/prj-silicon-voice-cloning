@@ -11,7 +11,7 @@ let package = Package(
     products: [
         .executable(
             name: "prj-silicon-voice-cloning",
-            targets: ["prj-silicon-voice-cloning"]
+            targets: ["CLI"]
         ),
         .executable(
             name: "benchmarks",
@@ -46,6 +46,10 @@ let package = Package(
         // Dependencies will be added here if needed
     ],
     targets: [
+        .executableTarget(
+            name: "CLI",
+            dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
+        ),
         .executableTarget(
             name: "prj-silicon-voice-cloning",
             dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
@@ -102,9 +106,8 @@ let package = Package(
         .testTarget(
             name: "FeatureTests",
             dependencies: [
-                "prj-silicon-voice-cloning", "Audio", "AudioProcessor", "DSP", "ML",
-                "ModelInference",
-                "Utilities",
+                "CLI", "Audio", "AudioProcessor", "DSP", "ML",
+                "ModelInference", "Utilities",
             ]
         ),
     ]

@@ -1,4 +1,5 @@
 import Foundation
+import Utilities
 
 /// A mock implementation of AudioProcessorProtocol for testing purposes.
 /// This implementation simulates audio processing without using actual audio hardware,
@@ -25,14 +26,19 @@ public class MockAudioProcessor: AudioProcessorProtocol {
         var playbackSucceeds: Bool = true
         /// Simulated latency in milliseconds
         var simulatedLatencyMs: Double = 20.0
+        /// Whether to log debug messages
+        var enableLogging: Bool = false
 
         public init(
-            captureSucceeds: Bool = true, playbackSucceeds: Bool = true,
-            simulatedLatencyMs: Double = 20.0
+            captureSucceeds: Bool = true,
+            playbackSucceeds: Bool = true,
+            simulatedLatencyMs: Double = 20.0,
+            enableLogging: Bool = false
         ) {
             self.captureSucceeds = captureSucceeds
             self.playbackSucceeds = playbackSucceeds
             self.simulatedLatencyMs = simulatedLatencyMs
+            self.enableLogging = enableLogging
         }
     }
 
@@ -42,78 +48,120 @@ public class MockAudioProcessor: AudioProcessorProtocol {
     /// Initializes a new MockAudioProcessor with the specified configuration
     public init(config: MockConfig = MockConfig()) {
         self.config = config
-        print("MockAudioProcessor initialized")
+        logDebug("MockAudioProcessor initialized")
     }
 
     /// Simulates starting audio capture
     public func startCapture() -> Bool {
         guard !isRunning else {
-            print("Audio capture already running")
-            return true
+            logDebug("MockAudioProcessor: Audio capture already running")
+            return false
         }
 
         guard config.captureSucceeds else {
-            print("Failed to set up input audio unit (simulated failure)")
+            logDebug("MockAudioProcessor: Audio capture failed (simulated failure)")
             return false
         }
 
         isRunning = true
-        print("Audio capture started (simulated)")
+        logDebug("Audio capture started (simulated)")
+
+        // Start a timer to simulate audio callbacks
+        startAudioCallbackTimer()
+
         return true
     }
 
     /// Simulates stopping audio capture
     public func stopCapture() {
-        guard isRunning else { return }
+        guard isRunning else {
+            logDebug("MockAudioProcessor: Audio capture not running")
+            return
+        }
 
         isRunning = false
-        print("Audio capture stopped (simulated)")
+        logDebug("Audio capture stopped (simulated)")
+
+        // Stop the audio callback timer
+        stopAudioCallbackTimer()
     }
 
     /// Simulates playing audio
     public func playAudio(_ buffer: [Float]) -> Bool {
-        guard !isRunning else {
-            print(
-                "Audio system is already running in real-time mode. Use the processing callback instead."
-            )
-            return false
-        }
-
         guard config.playbackSucceeds else {
-            print("Failed to set up output audio unit for playback (simulated failure)")
+            logDebug("MockAudioProcessor: Audio playback failed (simulated failure)")
             return false
         }
 
-        capturedAudioBuffer = buffer
+        // Record timestamp for latency measurement
+        let timestamp = Date().timeIntervalSince1970 * 1000
+        playbackTimestamps.append(timestamp)
 
-        // Process the buffer if a callback is set
-        if let processingCallback = audioProcessingCallback {
-            let _ = processingCallback(buffer)
-        }
-
-        // Record timestamps for latency calculation
-        let now = CFAbsoluteTimeGetCurrent()
-        captureTimestamps.append(now)
-        playbackTimestamps.append(now + (config.simulatedLatencyMs / 1000.0))
-
-        // Simulate playback duration without actually sleeping
-        let playbackDuration = Double(buffer.count) / 44100.0
-        print("Playback completed (simulated duration: \(playbackDuration) seconds)")
-
+        logDebug("Audio played (simulated): \(buffer.count) samples")
         return true
     }
 
-    /// Returns the simulated latency
+    /// Returns the measured latency
     public var measuredLatency: Double {
-        if !captureTimestamps.isEmpty && !playbackTimestamps.isEmpty {
-            let count = min(captureTimestamps.count, playbackTimestamps.count)
-            var totalLatency = 0.0
-            for i in 0..<count {
-                totalLatency += playbackTimestamps[i] - captureTimestamps[i]
-            }
-            return (totalLatency / Double(count)) * 1000.0
-        } else {
-            return config.simulatedLatencyMs
+        return config.simulatedLatencyMs
+    }
+
+    // MARK: - Private Methods
+
+    private var audioCallbackTimer: Timer?
+
+    /// Starts a timer to simulate audio callbacks
+    private func startAudioCallbackTimer() {
+        // Stop any existing timer
+        stopAudioCallbackTimer()
+
+        // Create a new timer that fires every 100ms
+        audioCallbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) {
+            [weak self] _ in
+            self?.simulateAudioCallback()
+        }
+    }
+
+    /// Stops the audio callback timer
+    private func stopAudioCallbackTimer() {
+        audioCallbackTimer?.invalidate()
+        audioCallbackTimer = nil
+    }
+
+    /// Simulates an audio callback with generated audio data
+    private func simulateAudioCallback() {
+        guard isRunning else { return }
+
+        // Generate a buffer of test audio data (sine wave)
+        let bufferSize = 512
+        var buffer = [Float](repeating: 0.0, count: bufferSize)
+
+        // Generate a simple sine wave at 440 Hz
+        let sampleRate: Double = 44100.0
+        let frequency: Double = 440.0
+
+        for i in 0..<bufferSize {
+            let time = Double(i) / sampleRate
+            buffer[i] = Float(sin(2.0 * Double.pi * frequency * time))
+        }
+
+        // Record timestamp for latency measurement
+        let timestamp = Date().timeIntervalSince1970 * 1000
+        captureTimestamps.append(timestamp)
+
+        // Process the buffer through the callback if one is set
+        if let callback = audioProcessingCallback {
+            let processedBuffer = callback(buffer)
+
+            // Simulate playback of the processed buffer
+            _ = playAudio(processedBuffer)
+        }
+    }
+
+    /// Log a debug message if logging is enabled
+    private func logDebug(_ message: String) {
+        if config.enableLogging {
+            LoggerUtility.debug(message)
         }
     }
 }

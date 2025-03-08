@@ -2,7 +2,7 @@
 
 ## 🚀 Project Overview
 
-This project aims to build a real-time, low-latency AI voice cloning system optimized for Apple Silicon (e.g., ARM M3 Max). The primary objective is to enable live voice conversion during Discord or other live communication calls—such as replicating character voices (e.g., Uncle Iroh from Avatar)—using native C or Swift for maximum performance and integration.
+This project aims to build a real-time, low-latency AI voice cloning system optimized for Apple Silicon (e.g., ARM M3 Max). The primary objective is to enable live voice conversion during Discord or other live communication calls—such as replicating character voices (e.g., Uncle Iroh from Avatar)—using native Swift for maximum performance and integration.
 
 ## 🎯 Goals
 
@@ -28,12 +28,15 @@ The project involves:
 .
 ├── Package.swift
 └── Sources/
-    ├── prj-silicon-voice-cloning/  # Main executable and CLI implementation
-    ├── AudioProcessor/             # Core Audio handling (input/output)
+    ├── CLI/                        # Command-line interface implementation
+    ├── Audio/                      # Core Audio handling (input/output)
+    ├── AudioProcessor/             # Audio processing implementation
     ├── DSP/                        # Signal processing via Accelerate (FFT, Mel-spectrogram)
+    ├── ML/                         # Machine learning utilities
     ├── ModelInference/             # Core ML model integration and inference
     ├── Benchmarks/                 # Performance benchmarking utility
-    └── Utilities/                  # Helper utilities and performance profiling tools
+    ├── Utilities/                  # Helper utilities and performance profiling tools
+    └── prj-silicon-voice-cloning/  # Main executable entry point
 ```
 
 ## 🚧 Development Plan
@@ -60,9 +63,11 @@ The project involves:
 git clone https://github.com/yourusername/real-time-voice-cloning.git
 cd real-time-voice-cloning
 
-# Build and run Swift CLI application
+# Build the project
 swift build
-swift run
+
+# Run the application with help command to see available options
+swift run prj-silicon-voice-cloning help
 
 # Run tests
 swift test
@@ -71,15 +76,52 @@ swift test
 swift run benchmarks
 ```
 
+## 📋 Available Commands
+
+The CLI provides several commands for testing and using the voice cloning system:
+
+```bash
+# Show help information
+swift run prj-silicon-voice-cloning help
+
+# Test audio output with a sine wave
+swift run prj-silicon-voice-cloning test-audio
+
+# Test microphone to speaker pass-through
+swift run prj-silicon-voice-cloning test-passthrough
+
+# Measure audio processing latency
+swift run prj-silicon-voice-cloning test-latency
+
+# Test DSP functionality with live audio
+swift run prj-silicon-voice-cloning test-dsp
+
+# Test ML capabilities
+swift run prj-silicon-voice-cloning test-ml
+
+# Test minimal end-to-end pipeline
+swift run prj-silicon-voice-cloning test-pipeline
+
+# Record a target voice for cloning
+swift run prj-silicon-voice-cloning record-target-voice
+
+# Test voice cloning with live audio
+swift run prj-silicon-voice-cloning test-voice-cloning
+
+# Clone voice from audio files
+swift run prj-silicon-voice-cloning clone-from-file --target-voice <target.wav> --source-voice <source.wav> --output <output.wav>
+```
+
 ## 🗓 Roadmap
 
-| Milestone                           | Duration  |
+| Milestone                           | Status    |
 | ----------------------------------- | --------- |
-| Swift + Core Audio Fundamentals     | 1 Week    |
-| DSP with Accelerate (FFT)           | 1 Week    |
-| Core ML Model Inference             | 1 Week    |
-| Integrate Voice Conversion Pipeline | 1-2 Weeks |
-| Audio Routing for Discord           | 1 Week    |
+| Swift + Core Audio Fundamentals     | Completed |
+| DSP with Accelerate (FFT)           | Completed |
+| Core ML Model Integration           | Completed |
+| Logging System Implementation       | Completed |
+| Voice Conversion Pipeline           | In Progress |
+| Audio Routing for Discord           | Planned   |
 | Optimization and Profiling          | Ongoing   |
 
 ## 📖 Additional Resources
@@ -130,7 +172,7 @@ swift run benchmarks --category critical
 swift run benchmarks --iterations 10 --warmup 3
 
 # Customize audio parameters
-swift run benchmarks --audio-length 10.0 --fft-size 2048
+swift run benchmarks --audio-length 10.0 --fft-size 2048 --hop-size 512
 ```
 
 #### Developer Guidelines
@@ -139,3 +181,26 @@ swift run benchmarks --audio-length 10.0 --fft-size 2048
 - Never add performance-related tests to the main test suite
 - Run benchmarks before and after optimization changes
 - Include benchmark results when submitting performance-related PRs
+
+## 📝 Logging System
+
+The project includes a comprehensive logging system with configurable log levels:
+
+- **DEBUG**: Detailed information for development and troubleshooting
+- **INFO**: General operational information
+- **WARNING**: Potential issues that don't prevent execution
+- **ERROR**: Critical issues that may cause failures
+
+Log levels can be configured in code:
+
+```swift
+// Set the current log level
+LoggerUtility.currentLogLevel = .debug  // Show all logs including debug
+LoggerUtility.currentLogLevel = .info   // Show only info, warning, and error logs
+```
+
+The logging system provides:
+- Timestamp formatting for all log messages
+- Thread-safe logging operations
+- Consistent output formatting
+- Clear separation between library code and user interface

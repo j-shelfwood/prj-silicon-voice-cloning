@@ -27,7 +27,7 @@ public class DSP {
             maxFrequency: sampleRate / 2
         )
 
-        print("DSP initialized with FFT size: \(fftSize), sample rate: \(sampleRate)")
+        LoggerUtility.debug("DSP initialized with FFT size: \(fftSize), sample rate: \(sampleRate)")
     }
 
     /**
@@ -75,5 +75,48 @@ public class DSP {
         -> [[Float]]
     {
         return melConverter.melToLogMel(melSpectrogram: melSpectrogram, ref: ref, floor: floor)
+    }
+
+    /**
+     Convert audio directly to mel spectrogram in one step
+
+     - Parameters:
+       - inputBuffer: Audio samples in time domain
+       - hopSize: Number of samples to advance between FFT windows (default: 256)
+     - Returns: Mel-scaled spectrogram
+     */
+    public func audioToMelSpectrogram(inputBuffer: [Float], hopSize: Int = 256) -> [[Float]] {
+        // Generate spectrogram from audio
+        let spectrogram = generateSpectrogram(inputBuffer: inputBuffer, hopSize: hopSize)
+
+        // Convert spectrogram to mel spectrogram
+        let melSpectrogram = specToMelSpec(spectrogram: spectrogram)
+
+        return melSpectrogram
+    }
+
+    /**
+     Convert audio directly to log-mel spectrogram in one step
+
+     - Parameters:
+       - inputBuffer: Audio samples in time domain
+       - hopSize: Number of samples to advance between FFT windows (default: 256)
+       - ref: Reference value for log scaling (default: 1.0)
+       - floor: Floor value to clip small values (default: 1e-5)
+     - Returns: Log-mel-spectrogram
+     */
+    public func audioToLogMelSpectrogram(
+        inputBuffer: [Float],
+        hopSize: Int = 256,
+        ref: Float = 1.0,
+        floor: Float = 1e-5
+    ) -> [[Float]] {
+        // Generate mel spectrogram
+        let melSpectrogram = audioToMelSpectrogram(inputBuffer: inputBuffer, hopSize: hopSize)
+
+        // Convert to log-mel spectrogram
+        let logMelSpectrogram = melToLogMel(melSpectrogram: melSpectrogram, ref: ref, floor: floor)
+
+        return logMelSpectrogram
     }
 }
