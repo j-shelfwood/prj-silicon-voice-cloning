@@ -15,18 +15,19 @@ public class DSP {
      Initialize a new DSP instance with the specified FFT size
 
      - Parameter fftSize: Size of the FFT to perform (default: 1024)
+     - Parameter sampleRate: Sample rate of the audio (default: 44100.0)
      */
-    public init(fftSize: Int = 1024) {
+    public init(fftSize: Int = 1024, sampleRate: Float = 44100.0) {
         self.fftProcessor = FFTProcessor(fftSize: fftSize)
         self.spectrogramGenerator = SpectrogramGenerator(fftSize: fftSize)
         self.melConverter = MelSpectrogramConverter(
-            sampleRate: 44100.0,
+            sampleRate: sampleRate,
             melBands: 40,
             minFrequency: 0.0,
-            maxFrequency: 8000.0
+            maxFrequency: sampleRate / 5.5  // ~8000 Hz for 44.1kHz
         )
 
-        Utilities.log("DSP initialized with FFT size: \(fftSize)")
+        Utilities.log("DSP initialized with FFT size: \(fftSize), sample rate: \(sampleRate)")
     }
 
     /**

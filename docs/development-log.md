@@ -435,6 +435,73 @@ This document serves as an ongoing development log for our Real-Time Voice Cloni
 
 ---
 
+## 2025-03-08: Performance Optimization - Accelerate Framework Deep Dive
+
+### Progress Summary
+- Dramatically improved mel spectrogram conversion performance (5.2s → 4ms)
+- Identified and fixed inefficient memory handling in DSP operations
+- Established best practices for Accelerate framework usage
+- Created baseline for further performance optimizations
+
+### Technical Details & Learnings
+
+#### Accelerate Framework Optimization
+- Proper pointer handling is crucial for performance:
+  - Use `withUnsafeMutableBufferPointer` for array access
+  - Avoid unnecessary array copies
+  - Leverage `vDSP_mmul` for efficient matrix operations
+  - Use `vDSP_vclip` for vectorized value clamping
+- Memory management improvements:
+  - Reuse arrays when possible
+  - Pre-allocate buffers for repeated operations
+  - Cache intermediate results (e.g., mel filterbank)
+  - Flatten 2D arrays for vectorized operations
+
+#### Performance Metrics
+- Mel spectrogram conversion:
+  - Before: ~5.2 seconds average
+  - After: ~4 milliseconds average
+  - ~1,294x performance improvement
+  - First run overhead: ~15ms (initialization)
+  - Subsequent runs: ~2.5ms average
+- Memory efficiency:
+  - Reduced unnecessary array allocations
+  - Better cache utilization
+  - Minimized data copying
+
+#### Swift and Accelerate Integration
+- Critical learnings:
+  - Swift's array bridging can be expensive
+  - Direct pointer access is faster but requires careful management
+  - Accelerate functions expect specific memory layouts
+  - Proper use of stride parameters affects performance
+- Best practices established:
+  - Use `withUnsafeBufferPointer` for read-only access
+  - Use `withUnsafeMutableBufferPointer` for in-place modifications
+  - Maintain proper alignment for vectorized operations
+  - Cache frequently used transformations
+
+### Next Steps
+1. Analyze other DSP operations for similar optimization opportunities
+2. Profile complete audio processing pipeline
+3. Investigate potential GPU acceleration using Metal
+4. Consider SIMD optimizations for non-Accelerate operations
+
+### Areas to Investigate
+- FFT processing efficiency
+- Audio buffer management
+- Spectrogram generation pipeline
+- Log-mel conversion vectorization
+- Real-time streaming optimizations
+
+### Performance Targets
+- DSP operations: <1ms per frame
+- Complete processing pipeline: <10ms
+- Model inference: <50ms
+- Total latency: <100ms end-to-end
+
+---
+
 <!-- Template for future entries -->
 <!--
 ## YYYY-MM-DD: [Summary Title]

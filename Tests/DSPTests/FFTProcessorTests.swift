@@ -4,12 +4,12 @@ import XCTest
 @testable import DSP
 @testable import Utilities
 
-final class FFTProcessorTests: XCTestCase {
+final class FFTProcessorTests: DSPBaseTestCase {
     var fftProcessor: FFTProcessor!
 
     override func setUp() {
         super.setUp()
-        fftProcessor = FFTProcessor(fftSize: 1024)
+        fftProcessor = FFTProcessor(fftSize: fftSize)
     }
 
     override func tearDown() {
@@ -18,39 +18,32 @@ final class FFTProcessorTests: XCTestCase {
     }
 
     func testInitialization() {
-        // Test that FFTProcessor initializes with the correct FFT size
         XCTAssertNotNil(fftProcessor, "FFTProcessor should initialize successfully")
-        XCTAssertEqual(fftProcessor.size, 1024, "FFT size should be 1024")
+        XCTAssertEqual(fftProcessor.size, fftSize, "FFT size should match initialized value")
 
         // Test with different FFT sizes
-        let processor256 = FFTProcessor(fftSize: 256)
-        XCTAssertNotNil(processor256, "FFTProcessor should initialize with FFT size 256")
-        XCTAssertEqual(processor256.size, 256, "FFT size should be 256")
-
-        let processor2048 = FFTProcessor(fftSize: 2048)
-        XCTAssertNotNil(processor2048, "FFTProcessor should initialize with FFT size 2048")
-        XCTAssertEqual(processor2048.size, 2048, "FFT size should be 2048")
+        let sizes = [256, 2048]
+        for size in sizes {
+            let processor = FFTProcessor(fftSize: size)
+            XCTAssertNotNil(processor, "FFTProcessor should initialize with FFT size \(size)")
+            XCTAssertEqual(processor.size, size, "FFT size should be \(size)")
+        }
     }
 
     func testPerformFFT() {
-        // Generate a simple sine wave for testing
-        let sampleRate: Float = 44100.0
         let frequency: Float = 1000.0  // 1kHz tone
-        let duration: Float = 1.0
-
-        let sineWave = Utilities.generateSineWave(
-            frequency: frequency, sampleRate: sampleRate, duration: duration)
-
-        // Perform FFT on the sine wave
+        let sineWave = generateTestSignal(frequency: frequency)
         let spectrum = fftProcessor.performFFT(inputBuffer: sineWave)
 
         // Check the output size
-        XCTAssertEqual(spectrum.count, 1024 / 2, "FFT output should have fftSize/2 elements")
+        XCTAssertEqual(spectrum.count, fftSize / 2, "FFT output should have fftSize/2 elements")
 
         // Test for peak at the expected frequency bin
-        // For a 1kHz tone at 44.1kHz sample rate with 1024-point FFT:
-        // bin = frequency * fftSize / sampleRate = 1000 * 1024 / 44100 ≈ 23.2
-        let expectedBin = Int(frequency / (sampleRate / Float(1024)))
+        let expectedBin = DSPTestUtilities.expectedFrequencyBin(
+            frequency: frequency,
+            sampleRate: sampleRate,
+            fftSize: fftSize
+        )
 
         // Find the peak bin
         var peakBin = 0
@@ -70,14 +63,10 @@ final class FFTProcessorTests: XCTestCase {
     }
 
     func testPerformFFTWithSmallBuffer() {
-        // Test with a buffer smaller than FFT size
-        let smallBuffer = [Float](repeating: 0.0, count: 512)  // Half the FFT size
-
-        // Should not crash and return a buffer of the expected size
+        let smallBuffer = [Float](repeating: 0.0, count: fftSize / 2)
         let spectrum = fftProcessor.performFFT(inputBuffer: smallBuffer)
-        XCTAssertEqual(
-            spectrum.count, 1024 / 2,
-            "FFT output should have fftSize/2 elements even with small input")
+
+        XCTAssertEqual(spectrum.count, fftSize / 2, "FFT output should have fftSize/2 elements")
 
         // All values should be zero since we provided insufficient samples
         for value in spectrum {
@@ -86,17 +75,10 @@ final class FFTProcessorTests: XCTestCase {
     }
 
     func testPerformanceOfFFT() {
-        // Generate a large test signal
-        let sampleRate: Float = 44100.0
-        let duration: Float = 10.0  // 10 seconds of audio
-        let sineWave = Utilities.generateSineWave(
-            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+        let sineWave = generateTestSignal(duration: 10.0)  // 10 seconds of audio
 
-        // Measure the performance of the FFT operation
-        measure {
-            for _ in 0..<10 {  // Perform 10 FFTs to get a good measurement
-                _ = fftProcessor.performFFT(inputBuffer: sineWave)
-            }
+        measurePerformance { [unowned self] in
+            _ = self.fftProcessor.performFFT(inputBuffer: sineWave)
         }
     }
 }

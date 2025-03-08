@@ -88,12 +88,21 @@ public class MelSpectrogramConverter {
             let frameStart = i * numFreqBins
             let frame = Array(flatSpectrogram[frameStart..<frameStart + numFreqBins])
 
+            // Add small epsilon to avoid zero values and ensure positive values
+            var processedFrame = [Float](repeating: 0.0, count: frame.count)
+            var epsilon: Float = 1e-10
+            var maxPossible: Float = Float.greatestFiniteMagnitude
+
+            // First ensure all values are positive
+            vDSP_vclip(
+                frame, 1, &epsilon, &maxPossible, &processedFrame, 1, vDSP_Length(frame.count))
+
             // Create mutable array for the frame result
             var frameResult = [Float](repeating: 0.0, count: melBands)
 
             // Perform matrix multiplication using vDSP
             frameResult.withUnsafeMutableBufferPointer { resultPtr in
-                frame.withUnsafeBufferPointer { framePtr in
+                processedFrame.withUnsafeBufferPointer { framePtr in
                     vDSP_mmul(
                         flatFB,  // Matrix A (filterbank)
                         1,  // A row stride
@@ -108,26 +117,12 @@ public class MelSpectrogramConverter {
                 }
             }
 
-            // Ensure non-negative values using vDSP_vclip
-            var minVal: Float = 0.0
-            var maxVal: Float = Float.infinity
-            frameResult.withUnsafeMutableBufferPointer { ptr in
-                withUnsafePointer(to: &minVal) { minPtr in
-                    withUnsafePointer(to: &maxVal) { maxPtr in
-                        vDSP_vclip(
-                            ptr.baseAddress!,
-                            1,
-                            minPtr,
-                            maxPtr,
-                            ptr.baseAddress!,
-                            1,
-                            vDSP_Length(melBands)
-                        )
-                    }
-                }
-            }
+            // Ensure non-negative values and add small epsilon
+            var clippedResult = frameResult
+            vDSP_vclip(
+                &frameResult, 1, &epsilon, &maxPossible, &clippedResult, 1, vDSP_Length(melBands))
 
-            melSpectrogram[i] = frameResult
+            melSpectrogram[i] = clippedResult
         }
 
         return melSpectrogram
@@ -153,32 +148,40 @@ public class MelSpectrogramConverter {
         let numFrames = melSpectrogram.count
         let numBands = melSpectrogram[0].count
         var minDb: Float = -80.0  // Minimum dB value to clip to
+        var maxDb: Float = 0.0  // Maximum dB value (reference level)
 
         // Flatten the mel spectrogram for vectorized operations
         let flatMel = melSpectrogram.flatMap { $0 }
 
+        // Ensure all values are positive and above floor
+        var processedMel = [Float](repeating: 0.0, count: flatMel.count)
+        var floorValue = floor
+        var maxPossible: Float = Float.greatestFiniteMagnitude
+        vDSP_vclip(
+            flatMel, 1, &floorValue, &maxPossible, &processedMel, 1, vDSP_Length(flatMel.count))
+
         // Find maximum value using vDSP
         var maxValue: Float = 0.0
-        vDSP_maxv(flatMel, 1, &maxValue, vDSP_Length(flatMel.count))
-        maxValue = max(maxValue, 1e-5)  // Avoid division by zero
+        vDSP_maxv(processedMel, 1, &maxValue, vDSP_Length(processedMel.count))
+        maxValue = max(maxValue, floor)  // Ensure maxValue is at least floor
 
         // Create buffer for results
         var logMelFlat = [Float](repeating: 0.0, count: flatMel.count)
 
-        // Clip values to floor
-        var floorValue = floor
-        vDSP_vclip(flatMel, 1, &floorValue, &maxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
-
-        // Normalize by maxValue
+        // Normalize by maxValue and ensure minimum value
         var recipMaxValue = 1.0 / maxValue
-        vDSP_vsmul(logMelFlat, 1, &recipMaxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
+        vDSP_vsmul(processedMel, 1, &recipMaxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
+
+        // Ensure all values are at least floor after normalization
+        vDSP_vclip(
+            logMelFlat, 1, &floorValue, &maxPossible, &logMelFlat, 1, vDSP_Length(flatMel.count))
 
         // Convert to log scale (10 * log10(x))
         var ten: Float = 10.0
         vDSP_vdbcon(logMelFlat, 1, &ten, &logMelFlat, 1, vDSP_Length(flatMel.count), 1)
 
-        // Clip to minimum dB
-        vDSP_vclip(logMelFlat, 1, &minDb, &maxValue, &logMelFlat, 1, vDSP_Length(flatMel.count))
+        // Clip to dB range
+        vDSP_vclip(logMelFlat, 1, &minDb, &maxDb, &logMelFlat, 1, vDSP_Length(flatMel.count))
 
         // Reshape back to 2D array
         var logMelSpectrogram = [[Float]](repeating: [], count: numFrames)

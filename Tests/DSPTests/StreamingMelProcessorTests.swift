@@ -2,16 +2,18 @@ import XCTest
 
 @testable import DSP
 
-final class StreamingMelProcessorTests: XCTestCase {
+final class StreamingMelProcessorTests: DSPBaseTestCase {
     var processor: StreamingMelProcessor!
+    let hopSize = 256
+    let melBands = 40
 
     override func setUp() {
         super.setUp()
         processor = StreamingMelProcessor(
-            fftSize: 1024,
-            hopSize: 256,
-            sampleRate: 44100.0,
-            melBands: 40,
+            fftSize: fftSize,
+            hopSize: hopSize,
+            sampleRate: sampleRate,
+            melBands: melBands,
             minFrequency: 0.0,
             maxFrequency: 8000.0
         )
@@ -28,10 +30,10 @@ final class StreamingMelProcessorTests: XCTestCase {
 
         // Test with different parameters
         let customProcessor = StreamingMelProcessor(
-            fftSize: 2048,
-            hopSize: 512,
+            fftSize: fftSize * 2,
+            hopSize: hopSize * 2,
             sampleRate: 48000.0,
-            melBands: 80,
+            melBands: melBands * 2,
             minFrequency: 20.0,
             maxFrequency: 20000.0
         )
@@ -40,44 +42,42 @@ final class StreamingMelProcessorTests: XCTestCase {
     }
 
     func testAddSamples() {
-        let testSamples = Array(repeating: Float(0.5), count: 1000)
+        let testSamples = [Float](repeating: 0.5, count: 1000)
         processor.addSamples(testSamples)
         XCTAssertEqual(processor.getBufferLength(), 1000)
 
         // Add more samples to test buffer size limiting
         processor.addSamples(testSamples)
-        XCTAssertLessThanOrEqual(processor.getBufferLength(), 1024 * 3)
+        XCTAssertLessThanOrEqual(processor.getBufferLength(), fftSize * 3)
     }
 
     func testProcessMelSpectrogram() {
-        // Generate a test signal (440 Hz sine wave)
-        let sampleRate: Float = 44100.0
-        let duration: Float = 0.5
-        let frequency: Float = 440.0
-        let numSamples = Int(sampleRate * duration)
-
-        var samples: [Float] = []
-        for i in 0..<numSamples {
-            let t = Float(i) / sampleRate
-            samples.append(sin(2.0 * .pi * frequency * t))
-        }
-
-        processor.addSamples(samples)
+        let sineWave = generateTestSignal(duration: 0.5)
+        processor.addSamples(sineWave)
 
         // Process all available frames
         let (melFrames, samplesConsumed) = processor.processMelSpectrogram()
 
-        XCTAssertFalse(melFrames.isEmpty)
-        XCTAssertEqual(melFrames[0].count, 40)  // Number of mel bands
+        // Use the utility method for verification
+        DSPTestUtilities.verifyMelSpectrogramProperties(
+            melSpectrogram: melFrames,
+            expectedBands: melBands
+        )
         XCTAssertGreaterThan(samplesConsumed, 0)
 
-        // Verify no NaN or infinite values
-        for frame in melFrames {
-            for value in frame {
-                XCTAssertFalse(value.isNaN)
-                XCTAssertFalse(value.isInfinite)
-            }
-        }
+        // Instead of trying to calculate the exact number, which depends on internal implementation
+        // details of StreamingMelProcessor, let's verify that:
+        // 1. Some samples were consumed (already checked above)
+        // 2. The number of samples consumed is reasonable (less than or equal to the input)
+        XCTAssertLessThanOrEqual(
+            samplesConsumed, sineWave.count,
+            "Should not consume more samples than provided")
+
+        // We can also check that the number of frames produced matches our expectations
+        let expectedFrameCount = (samplesConsumed - fftSize) / hopSize + 1
+        XCTAssertEqual(
+            melFrames.count, expectedFrameCount,
+            "Number of frames should match the calculation based on samples consumed")
 
         // Test with empty buffer
         processor.reset()
@@ -87,36 +87,17 @@ final class StreamingMelProcessorTests: XCTestCase {
     }
 
     func testProcessLogMelSpectrogram() {
-        // Generate a test signal (440 Hz sine wave)
-        let sampleRate: Float = 44100.0
-        let duration: Float = 0.5
-        let frequency: Float = 440.0
-        let numSamples = Int(sampleRate * duration)
-
-        var samples: [Float] = []
-        for i in 0..<numSamples {
-            let t = Float(i) / sampleRate
-            samples.append(sin(2.0 * .pi * frequency * t))
-        }
-
-        processor.addSamples(samples)
+        let sineWave = generateTestSignal(duration: 0.5)
+        processor.addSamples(sineWave)
 
         // Process all available frames
         let (logMelFrames, samplesConsumed) = processor.processLogMelSpectrogram()
 
-        XCTAssertFalse(logMelFrames.isEmpty)
-        XCTAssertEqual(logMelFrames[0].count, 40)  // Number of mel bands
+        DSPTestUtilities.verifyLogMelSpectrogramProperties(
+            logMelSpectrogram: logMelFrames,
+            expectedBands: melBands
+        )
         XCTAssertGreaterThan(samplesConsumed, 0)
-
-        // Verify values are within expected dB range and no NaN/infinite values
-        for frame in logMelFrames {
-            for value in frame {
-                XCTAssertFalse(value.isNaN)
-                XCTAssertFalse(value.isInfinite)
-                XCTAssertLessThanOrEqual(value, 0.0)  // dB values should be <= 0
-                XCTAssertGreaterThanOrEqual(value, -80.0)  // Typical floor for dB values
-            }
-        }
 
         // Test with empty buffer
         processor.reset()
@@ -126,19 +107,8 @@ final class StreamingMelProcessorTests: XCTestCase {
     }
 
     func testMinFramesProcessing() {
-        // Generate 2 seconds of audio
-        let sampleRate: Float = 44100.0
-        let duration: Float = 2.0
-        let frequency: Float = 440.0
-        let numSamples = Int(sampleRate * duration)
-
-        var samples: [Float] = []
-        for i in 0..<numSamples {
-            let t = Float(i) / sampleRate
-            samples.append(sin(2.0 * .pi * frequency * t))
-        }
-
-        processor.addSamples(samples)
+        let sineWave = generateTestSignal(duration: 2.0)  // 2 seconds of audio
+        processor.addSamples(sineWave)
 
         // Request specific number of frames
         let requestedFrames = 5
@@ -152,7 +122,7 @@ final class StreamingMelProcessorTests: XCTestCase {
     }
 
     func testReset() {
-        let testSamples = Array(repeating: Float(0.5), count: 1000)
+        let testSamples = [Float](repeating: 0.5, count: 1000)
         processor.addSamples(testSamples)
         XCTAssertGreaterThan(processor.getBufferLength(), 0)
 
@@ -161,42 +131,20 @@ final class StreamingMelProcessorTests: XCTestCase {
     }
 
     func testPerformanceOfMelSpectrogram() {
-        // Generate 5 seconds of audio for performance testing
-        let sampleRate: Float = 44100.0
-        let duration: Float = 5.0
-        let frequency: Float = 440.0
-        let numSamples = Int(sampleRate * duration)
+        let sineWave = generateTestSignal(duration: 5.0)  // 5 seconds of audio
+        processor.addSamples(sineWave)
 
-        var samples: [Float] = []
-        for i in 0..<numSamples {
-            let t = Float(i) / sampleRate
-            samples.append(sin(2.0 * .pi * frequency * t))
-        }
-
-        processor.addSamples(samples)
-
-        measure {
-            let (_, _) = processor.processMelSpectrogram()
+        measurePerformance { [unowned self] in
+            let (_, _) = self.processor.processMelSpectrogram()
         }
     }
 
     func testPerformanceOfLogMelSpectrogram() {
-        // Generate 5 seconds of audio for performance testing
-        let sampleRate: Float = 44100.0
-        let duration: Float = 5.0
-        let frequency: Float = 440.0
-        let numSamples = Int(sampleRate * duration)
+        let sineWave = generateTestSignal(duration: 5.0)  // 5 seconds of audio
+        processor.addSamples(sineWave)
 
-        var samples: [Float] = []
-        for i in 0..<numSamples {
-            let t = Float(i) / sampleRate
-            samples.append(sin(2.0 * .pi * frequency * t))
-        }
-
-        processor.addSamples(samples)
-
-        measure {
-            let (_, _) = processor.processLogMelSpectrogram()
+        measurePerformance { [unowned self] in
+            let (_, _) = self.processor.processLogMelSpectrogram()
         }
     }
 }

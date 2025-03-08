@@ -3,19 +3,19 @@ import XCTest
 @testable import DSP
 @testable import Utilities
 
-final class MelSpectrogramConverterTests: XCTestCase {
+final class MelSpectrogramConverterTests: DSPBaseTestCase {
     var melConverter: MelSpectrogramConverter!
     var spectrogramGenerator: SpectrogramGenerator!
 
     override func setUp() {
         super.setUp()
         melConverter = MelSpectrogramConverter(
-            sampleRate: 44100.0,
+            sampleRate: sampleRate,
             melBands: 40,
             minFrequency: 0.0,
             maxFrequency: 8000.0
         )
-        spectrogramGenerator = SpectrogramGenerator(fftSize: 1024)
+        spectrogramGenerator = SpectrogramGenerator(fftSize: fftSize)
     }
 
     override func tearDown() {
@@ -42,10 +42,7 @@ final class MelSpectrogramConverterTests: XCTestCase {
 
     func testSpecToMelSpec() {
         // Generate a real spectrogram using a sine wave
-        let sampleRate: Float = 44100
-        let duration: Float = 0.5
-        let signal = Utilities.generateSineWave(
-            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+        let signal = generateTestSignal(frequency: 440.0, duration: 0.5)
 
         // Generate spectrogram
         let spectrogram = spectrogramGenerator.generateSpectrogram(inputBuffer: signal)
@@ -78,10 +75,7 @@ final class MelSpectrogramConverterTests: XCTestCase {
 
     func testMelToLogMel() {
         // Generate a real spectrogram using a sine wave
-        let sampleRate: Float = 44100
-        let duration: Float = 0.5
-        let signal = Utilities.generateSineWave(
-            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+        let signal = generateTestSignal(frequency: 440.0, duration: 0.5)
 
         // Generate spectrogram and convert to mel spectrogram
         let spectrogram = spectrogramGenerator.generateSpectrogram(inputBuffer: signal)
@@ -133,13 +127,10 @@ final class MelSpectrogramConverterTests: XCTestCase {
 
     func testPerformanceOfMelSpecConversion() {
         // Generate a large test signal
-        let sampleRate: Float = 44100.0
-        let duration: Float = 5.0  // 5 seconds of audio
-        let sineWave = Utilities.generateSineWave(
-            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+        let signal = generateTestSignal(frequency: 440.0, duration: 5.0)
 
         // Generate spectrogram
-        let spectrogram = spectrogramGenerator.generateSpectrogram(inputBuffer: sineWave)
+        let spectrogram = spectrogramGenerator.generateSpectrogram(inputBuffer: signal)
 
         // Measure the performance of the mel spectrogram conversion
         measure {
@@ -149,13 +140,10 @@ final class MelSpectrogramConverterTests: XCTestCase {
 
     func testPerformanceOfLogMelConversion() {
         // Generate a large test signal
-        let sampleRate: Float = 44100.0
-        let duration: Float = 5.0  // 5 seconds of audio
-        let sineWave = Utilities.generateSineWave(
-            frequency: 440.0, sampleRate: sampleRate, duration: duration)
+        let signal = generateTestSignal(frequency: 440.0, duration: 5.0)
 
         // Generate spectrogram and mel spectrogram
-        let spectrogram = spectrogramGenerator.generateSpectrogram(inputBuffer: sineWave)
+        let spectrogram = spectrogramGenerator.generateSpectrogram(inputBuffer: signal)
         let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
 
         // Measure the performance of the log-mel spectrogram conversion
