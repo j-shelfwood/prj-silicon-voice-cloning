@@ -30,6 +30,10 @@ let package = Package(
             targets: ["DSP"]
         ),
         .library(
+            name: "ML",
+            targets: ["ML"]
+        ),
+        .library(
             name: "ModelInference",
             targets: ["ModelInference"]
         ),
@@ -44,11 +48,11 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "prj-silicon-voice-cloning",
-            dependencies: ["Audio", "AudioProcessor", "DSP", "ModelInference", "Utilities"]
+            dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
         ),
         .executableTarget(
             name: "Benchmarks",
-            dependencies: ["Audio", "AudioProcessor", "DSP", "ModelInference", "Utilities"]
+            dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
         ),
         .target(
             name: "Audio",
@@ -63,8 +67,12 @@ let package = Package(
             dependencies: ["Utilities"]
         ),
         .target(
-            name: "ModelInference",
+            name: "ML",
             dependencies: ["Utilities"]
+        ),
+        .target(
+            name: "ModelInference",
+            dependencies: ["Utilities", "ML", "DSP"]
         ),
         .target(
             name: "Utilities",
@@ -89,12 +97,13 @@ let package = Package(
         ),
         .testTarget(
             name: "ModelInferenceTests",
-            dependencies: ["ModelInference"]
+            dependencies: ["ModelInference", "ML"]
         ),
         .testTarget(
             name: "FeatureTests",
             dependencies: [
-                "prj-silicon-voice-cloning", "Audio", "AudioProcessor", "DSP", "ModelInference",
+                "prj-silicon-voice-cloning", "Audio", "AudioProcessor", "DSP", "ML",
+                "ModelInference",
                 "Utilities",
             ]
         ),

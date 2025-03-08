@@ -1,5 +1,6 @@
-import XCTest
 import Utilities
+import XCTest
+
 @testable import DSP
 
 class DSPBaseTestCase: XCTestCase {
@@ -23,24 +24,10 @@ class DSPBaseTestCase: XCTestCase {
     override func setUp() {
         super.setUp()
         // Add common setup code that all DSP tests might need
-        Utilities.log("Setting up DSP test with sample rate: \(sampleRate), FFT size: \(fftSize)")
+        print("Setting up DSP test with sample rate: \(sampleRate), FFT size: \(fftSize)")
     }
 
     override func tearDown() {
         super.tearDown()
-    }
-
-    // Performance test helper
-    func measurePerformance(
-        iterations: Int = 10,
-        file: StaticString = #file,
-        line: UInt = #line,
-        operation: () -> Void
-    ) {
-        measure {
-            for _ in 0..<iterations {
-                operation()
-            }
-        }
     }
 }

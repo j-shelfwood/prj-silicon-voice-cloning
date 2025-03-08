@@ -23,11 +23,11 @@ public class DSP {
         self.melConverter = MelSpectrogramConverter(
             sampleRate: sampleRate,
             melBands: 40,
-            minFrequency: 0.0,
-            maxFrequency: sampleRate / 5.5  // ~8000 Hz for 44.1kHz
+            minFrequency: 0,
+            maxFrequency: sampleRate / 2
         )
 
-        Utilities.log("DSP initialized with FFT size: \(fftSize), sample rate: \(sampleRate)")
+        print("DSP initialized with FFT size: \(fftSize), sample rate: \(sampleRate)")
     }
 
     /**

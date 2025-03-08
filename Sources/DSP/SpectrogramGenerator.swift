@@ -39,7 +39,7 @@ public class SpectrogramGenerator {
 
         // Ensure input buffer is large enough
         guard inputBuffer.count >= fftSize else {
-            Utilities.log(
+            print(
                 "Error: Input buffer too small for spectrogram generation. Expected at least \(fftSize) samples, got \(inputBuffer.count)."
             )
             return []
@@ -103,7 +103,7 @@ public class SpectrogramGenerator {
 
         // Ensure input buffer is large enough
         guard inputBuffer.count >= fftSize else {
-            Utilities.log(
+            print(
                 "Error: Input buffer too small for spectrogram generation. Expected at least \(fftSize) samples, got \(inputBuffer.count)."
             )
             return []

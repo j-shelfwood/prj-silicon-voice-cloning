@@ -28,28 +28,31 @@ public class StreamingMelProcessor {
      */
     public init(
         fftSize: Int = 1024,
-        hopSize: Int = 256,
+        hopSize: Int? = nil,
         sampleRate: Float = 44100.0,
         melBands: Int = 40,
         minFrequency: Float = 0.0,
         maxFrequency: Float = 8000.0
     ) {
-        self.spectrogramGenerator = SpectrogramGenerator(fftSize: fftSize, hopSize: hopSize)
+        self.spectrogramGenerator = SpectrogramGenerator(
+            fftSize: fftSize, hopSize: hopSize ?? (fftSize / 2))
         self.melConverter = MelSpectrogramConverter(
             sampleRate: sampleRate,
             melBands: melBands,
             minFrequency: minFrequency,
             maxFrequency: maxFrequency
         )
-        self.hopSize = hopSize
+        self.hopSize = hopSize ?? (fftSize / 2)
         self.sampleRate = sampleRate
         self.melBands = melBands
 
         // Keep enough samples for at least 2 FFT windows to ensure smooth processing
         self.maxBufferSize = fftSize * 3
 
-        Utilities.log(
-            "StreamingMelProcessor initialized with FFT size: \(fftSize), hop size: \(hopSize)")
+        // Use print instead of Utilities.log to avoid MainActor requirement
+        print(
+            "StreamingMelProcessor initialized with FFT size: \(fftSize), hop size: \(self.hopSize)"
+        )
     }
 
     /**

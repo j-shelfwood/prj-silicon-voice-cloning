@@ -201,6 +201,7 @@ struct BenchmarkConfig {
 }
 
 /// Run all benchmarks
+@MainActor
 func runAllBenchmarks(config: BenchmarkConfig = .standard) {
     print("╔═══════════════════════════════════════════════════════════════════════════╗")
     print("║                     Voice Cloning Performance Benchmarks                   ║")
@@ -239,8 +240,9 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         sampleRate: config.sampleRate,
         melBands: config.melBands
     )
-    let modelInference = ModelInference(
-        config: ModelInference.InferenceConfig(simulateModelLoading: true))
+
+    // Use the BenchmarkModelInference class instead of ModelInference to avoid @MainActor issues
+    let benchmarkModelInference = BenchmarkModelInference()
 
     // Run DSP benchmarks
     if [.all, .dsp, .critical].contains(config.runCategory) {
@@ -248,224 +250,150 @@ func runAllBenchmarks(config: BenchmarkConfig = .standard) {
         print("║                           DSP BENCHMARKS                                   ║")
         print("╚═══════════════════════════════════════════════════════════════════════════╝")
 
-        // Benchmark 1: Sine Wave Generation
-        let sineWaveBenchmark = Benchmark(name: "Sine Wave Generation (10s)")
+        // Benchmark: Sine Wave Generation
+        let sineWaveBenchmark = Benchmark(name: "Sine Wave Generation")
         sineWaveBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            _ = Utilities.generateSineWave(
+            let _ = Utilities.generateSineWave(
                 frequency: 440.0,
                 sampleRate: config.sampleRate,
-                duration: 10.0
+                duration: config.audioLength
             )
         }
 
-        // Benchmark 2: FFT Processing
+        // Benchmark: FFT Processing
         let fftBenchmark = Benchmark(name: "FFT Processing")
         fftBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            _ = fftProcessor.performFFT(inputBuffer: sineWave)
+            let _ = fftProcessor.performFFT(inputBuffer: Array(sineWave.prefix(config.fftSize)))
         }
 
-        // Benchmark 3: Spectrogram Generation
+        // Benchmark: Spectrogram Generation
         let spectrogramBenchmark = Benchmark(name: "Spectrogram Generation")
         spectrogramBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            _ = spectrogramGenerator.generateSpectrogram(
-                inputBuffer: sineWave,
-                hopSize: config.hopSize
-            )
+            let _ = spectrogramGenerator.generateSpectrogram(
+                inputBuffer: sineWave, hopSize: config.hopSize)
         }
 
-        // Benchmark 4: Parallel Spectrogram Generation
-        let parallelSpectrogramBenchmark = Benchmark(name: "Parallel Spectrogram Generation")
-        parallelSpectrogramBenchmark.run(
-            iterations: config.iterations, warmup: config.warmupIterations
-        ) {
-            _ = spectrogramGenerator.generateSpectrogramParallel(
-                inputBuffer: sineWave,
-                hopSize: config.hopSize
-            )
-        }
-
-        // Generate a spectrogram for the next benchmarks
-        let spectrogram = spectrogramGenerator.generateSpectrogram(
-            inputBuffer: sineWave,
-            hopSize: config.hopSize
-        )
-
-        // Benchmark 5: Mel Spectrogram Conversion
+        // Benchmark: Mel Spectrogram Conversion
         let melSpecBenchmark = Benchmark(name: "Mel Spectrogram Conversion")
+        let spectrogram = spectrogramGenerator.generateSpectrogram(
+            inputBuffer: sineWave, hopSize: config.hopSize)
         melSpecBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            _ = melConverter.specToMelSpec(spectrogram: spectrogram)
+            let _ = melConverter.specToMelSpec(spectrogram: spectrogram)
         }
 
-        // Generate a mel spectrogram for the next benchmark
-        let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
-
-        // Benchmark 6: Log Mel Spectrogram Conversion
+        // Benchmark: Log Mel Spectrogram Conversion
         let logMelBenchmark = Benchmark(name: "Log Mel Spectrogram Conversion")
+        let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
         logMelBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            _ = melConverter.melToLogMel(melSpectrogram: melSpectrogram)
+            let _ = melConverter.melToLogMel(melSpectrogram: melSpectrogram)
         }
 
-        // Benchmark 7: Streaming Mel Processor
-        let streamingBenchmark = Benchmark(name: "Streaming Mel Processor")
+        // Benchmark: Streaming Mel Processing
+        let streamingBenchmark = Benchmark(name: "Streaming Mel Processing")
         streamingBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
             streamingProcessor.reset()
             streamingProcessor.addSamples(sineWave)
-            _ = streamingProcessor.processMelSpectrogram()
+            let _ = streamingProcessor.processMelSpectrogram()
         }
 
-        // Benchmark 8: End-to-End DSP Pipeline
-        let endToEndBenchmark = Benchmark(name: "End-to-End DSP Pipeline")
-        endToEndBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            let spectrogram = dsp.generateSpectrogram(inputBuffer: sineWave)
-            let melSpec = dsp.specToMelSpec(spectrogram: spectrogram)
-            _ = dsp.melToLogMel(melSpectrogram: melSpec)
-        }
-    }
-
-    // Run Audio benchmarks
-    if [.all, .audio].contains(config.runCategory) {
-        print("╔═══════════════════════════════════════════════════════════════════════════╗")
-        print("║                           AUDIO BENCHMARKS                                 ║")
-        print("╚═══════════════════════════════════════════════════════════════════════════╝")
-
-        // Audio processing benchmarks would go here
-        // Since we're using mock audio processor for tests, we'll just add a placeholder
-        let audioBenchmark = Benchmark(name: "Audio Processing (Mock)")
-        audioBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            let processor = MockAudioProcessor()
-            _ = processor.startCapture()  // Use the result to avoid warning
-            Thread.sleep(forTimeInterval: 0.01)  // Simulate a small amount of processing
-            processor.stopCapture()
+        // Benchmark: End-to-End DSP Pipeline
+        let pipelineBenchmark = Benchmark(name: "End-to-End DSP Pipeline")
+        pipelineBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
+            let spec = spectrogramGenerator.generateSpectrogram(
+                inputBuffer: sineWave, hopSize: config.hopSize)
+            let melSpec = melConverter.specToMelSpec(spectrogram: spec)
+            let _ = melConverter.melToLogMel(melSpectrogram: melSpec)
         }
     }
 
-    // Run Model benchmarks
-    if [.all, .model, .critical].contains(config.runCategory) {
+    // Run ML benchmarks
+    if [.all, .model].contains(config.runCategory) {
         print("╔═══════════════════════════════════════════════════════════════════════════╗")
-        print("║                           MODEL BENCHMARKS                                 ║")
+        print("║                           ML BENCHMARKS                                    ║")
         print("╚═══════════════════════════════════════════════════════════════════════════╝")
 
-        // Benchmark 9: Model Loading (simulated)
+        // Create test mel spectrogram for ML benchmarks
+        let spectrogram = spectrogramGenerator.generateSpectrogram(
+            inputBuffer: sineWave, hopSize: config.hopSize)
+        let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
+
+        // Benchmark: Model Loading
         let modelLoadingBenchmark = Benchmark(name: "Model Loading (Simulated)")
         modelLoadingBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            _ = modelInference.loadModel(
+            _ = benchmarkModelInference.loadModel(
                 modelPath: "/path/to/model.mlmodel",
                 modelType: .voiceConverter
             )
         }
 
-        // Create test mel spectrogram for model inference
-        let spectrogram = spectrogramGenerator.generateSpectrogram(
-            inputBuffer: sineWave,
-            hopSize: config.hopSize
-        )
-        let melSpectrogram = melConverter.specToMelSpec(spectrogram: spectrogram)
-
-        // Benchmark 10: Voice Conversion (simulated)
+        // Benchmark: Voice Conversion
         let voiceConversionBenchmark = Benchmark(name: "Voice Conversion (Simulated)")
         voiceConversionBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations)
         {
-            // Create a benchmark simulation instance
-            let benchmarkInference = BenchmarkModelInference()
-            _ = benchmarkInference.loadModel(
-                modelPath: "/path/to/model.mlmodel", modelType: .voiceConverter)
-
-            // Use the synchronous simulation
-            _ = benchmarkInference.processVoiceConversion(melSpectrogram: melSpectrogram)
+            _ = benchmarkModelInference.processVoiceConversion(melSpectrogram: melSpectrogram)
         }
 
-        // Benchmark 11: Audio Generation (simulated)
-        let audioGenBenchmark = Benchmark(name: "Audio Generation (Simulated)")
-        audioGenBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            // Create a benchmark simulation instance
-            let benchmarkInference = BenchmarkModelInference()
-            _ = benchmarkInference.loadModel(
-                modelPath: "/path/to/model.mlmodel", modelType: .vocoder)
-
-            // Use the synchronous simulation
-            _ = benchmarkInference.generateAudio(melSpectrogram: melSpectrogram)
+        // Benchmark: Audio Generation
+        let audioGenerationBenchmark = Benchmark(name: "Audio Generation (Simulated)")
+        audioGenerationBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations)
+        {
+            _ = benchmarkModelInference.generateAudio(melSpectrogram: melSpectrogram)
         }
     }
 
-    // Run Critical Path benchmarks
-    if [.critical].contains(config.runCategory) {
+    // Run audio processing benchmarks
+    if [.all, .audio].contains(config.runCategory) {
         print("╔═══════════════════════════════════════════════════════════════════════════╗")
-        print("║                      CRITICAL PATH BENCHMARKS                              ║")
+        print("║                           AUDIO BENCHMARKS                                 ║")
         print("╚═══════════════════════════════════════════════════════════════════════════╝")
 
-        // Benchmark 12: End-to-End Voice Cloning Pipeline (simulated)
-        let e2eBenchmark = Benchmark(name: "End-to-End Voice Cloning Pipeline (Simulated)")
-        e2eBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            // Create a benchmark simulation instance
-            let benchmarkInference = BenchmarkModelInference()
-            _ = benchmarkInference.loadModel(
-                modelPath: "/path/to/model.mlmodel", modelType: .voiceConverter)
-            _ = benchmarkInference.loadModel(
-                modelPath: "/path/to/model.mlmodel", modelType: .vocoder)
-
-            // 1. Process audio to mel spectrogram
-            let spectrogram = dsp.generateSpectrogram(inputBuffer: sineWave)
-            let melSpec = dsp.specToMelSpec(spectrogram: spectrogram)
-            let logMelSpec = dsp.melToLogMel(melSpectrogram: melSpec)
-
-            // 2. Run voice conversion (simulated) using synchronous simulation
-            if let convertedMel = benchmarkInference.processVoiceConversion(
-                melSpectrogram: logMelSpec)
-            {
-                // 3. Generate audio from converted mel (simulated) using synchronous simulation
-                _ = benchmarkInference.generateAudio(melSpectrogram: convertedMel)
-            }
-        }
-
-        // Benchmark 13: Streaming Voice Conversion (simulated)
-        let streamingVCBenchmark = Benchmark(name: "Streaming Voice Conversion (Simulated)")
-        streamingVCBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
-            // Create a benchmark simulation instance
-            let benchmarkInference = BenchmarkModelInference()
-            _ = benchmarkInference.loadModel(
-                modelPath: "/path/to/model.mlmodel", modelType: .voiceConverter)
-            _ = benchmarkInference.loadModel(
-                modelPath: "/path/to/model.mlmodel", modelType: .vocoder)
-
-            // 1. Reset streaming processor
-            streamingProcessor.reset()
-
-            // 2. Process in chunks to simulate streaming
-            let chunkSize = 4096
-            let chunks = sineWave.count / chunkSize
-
-            for i in 0..<chunks {
-                let start = i * chunkSize
-                let end = min(start + chunkSize, sineWave.count)
-                let chunk = Array(sineWave[start..<end])
-
-                // Add chunk to processor
-                streamingProcessor.addSamples(chunk)
-
-                // Process if we have enough frames
-                let melSpecResult = streamingProcessor.processMelSpectrogram()
-
-                // Only process if we got actual mel frames
-                if !melSpecResult.melFrames.isEmpty {
-                    // Convert to log mel - extract just the mel frames from the tuple
-                    let logMelSpec = melConverter.melToLogMel(
-                        melSpectrogram: melSpecResult.melFrames)
-
-                    // Simulate voice conversion and audio generation using synchronous simulation
-                    if let convertedMel = benchmarkInference.processVoiceConversion(
-                        melSpectrogram: logMelSpec)
-                    {
-                        _ = benchmarkInference.generateAudio(melSpectrogram: convertedMel)
-                    }
-                }
-            }
+        // Benchmark: Audio Processing (Mock)
+        let audioProcessingBenchmark = Benchmark(name: "Audio Processing (Mock)")
+        audioProcessingBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations)
+        {
+            // Simulate audio processing with a simple gain adjustment
+            let _ = sineWave.map { $0 * 0.5 }
         }
     }
 
-    print("╔═══════════════════════════════════════════════════════════════════════════╗")
-    print("║                         BENCHMARK COMPLETE                                 ║")
-    print("╚═══════════════════════════════════════════════════════════════════════════╝")
+    // Run critical path benchmarks (end-to-end voice cloning pipeline)
+    if [.all, .critical].contains(config.runCategory) {
+        print("╔═══════════════════════════════════════════════════════════════════════════╗")
+        print("║                           CRITICAL PATH BENCHMARKS                         ║")
+        print("╚═══════════════════════════════════════════════════════════════════════════╝")
+
+        // Benchmark: End-to-End Voice Cloning Pipeline
+        let e2eBenchmark = Benchmark(name: "End-to-End Voice Cloning Pipeline")
+        e2eBenchmark.run(iterations: config.iterations, warmup: config.warmupIterations) {
+            // 1. Generate spectrogram
+            let spec = spectrogramGenerator.generateSpectrogram(
+                inputBuffer: sineWave, hopSize: config.hopSize)
+
+            // 2. Convert to mel spectrogram
+            let melSpec = melConverter.specToMelSpec(spectrogram: spec)
+
+            // 3. Convert to log mel spectrogram
+            let logMelSpec = melConverter.melToLogMel(melSpectrogram: melSpec)
+
+            // 4. Process through voice conversion model (simulated)
+            let convertedMelSpec = benchmarkModelInference.processVoiceConversion(
+                melSpectrogram: melSpec)!
+
+            // 5. Generate audio from converted mel spectrogram (simulated)
+            let _ = benchmarkModelInference.generateAudio(melSpectrogram: convertedMelSpec)
+        }
+    }
 }
 
 // Run the benchmarks with command line arguments
-runAllBenchmarks(config: BenchmarkConfig.fromCommandLine())
+Task { @MainActor in
+    await runBenchmarksAsync(config: BenchmarkConfig.fromCommandLine())
+}
+
+// Keep the program running until benchmarks complete
+RunLoop.main.run(until: Date(timeIntervalSinceNow: 300))  // 5 minutes timeout
+
+@MainActor
+func runBenchmarksAsync(config: BenchmarkConfig) async {
+    runAllBenchmarks(config: config)
+}

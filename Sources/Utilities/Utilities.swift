@@ -1,14 +1,8 @@
 import Foundation
 
-/**
- Utility functions for the voice cloning system including timing,
- logging, and audio generation helpers.
- */
+/// Main utility class that provides access to all utility functions.
+/// This class serves as a facade for the specialized utility classes.
 public class Utilities {
-
-    @MainActor
-    private static var timers: [String: CFAbsoluteTime] = [:]
-
     /**
      Start a timer with the given ID
 
@@ -16,7 +10,7 @@ public class Utilities {
      */
     @MainActor
     public static func startTimer(id: String) {
-        timers[id] = CFAbsoluteTimeGetCurrent()
+        TimerUtility.startTimer(id: id)
     }
 
     /**
@@ -27,16 +21,7 @@ public class Utilities {
      */
     @MainActor
     public static func endTimer(id: String) -> Double {
-        guard let startTime = timers[id] else {
-            print("Warning: Timer with ID '\(id)' doesn't exist")
-            return 0
-        }
-
-        let endTime = CFAbsoluteTimeGetCurrent()
-        let elapsedTime = (endTime - startTime) * 1000
-        timers.removeValue(forKey: id)
-
-        return elapsedTime
+        return TimerUtility.endTimer(id: id)
     }
 
     /**
@@ -44,11 +29,9 @@ public class Utilities {
 
      - Parameter message: The message to log
      */
+    @MainActor
     public static func log(_ message: String) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
-        let timestamp = dateFormatter.string(from: Date())
-        print("[\(timestamp)] \(message)")
+        LoggerUtility.log(message)
     }
 
     /**
@@ -60,15 +43,10 @@ public class Utilities {
        - duration: Duration of the sine wave in seconds
      - Returns: Array of float samples representing the sine wave
      */
-    public static func generateSineWave(frequency: Float, sampleRate: Float, duration: Float) -> [Float] {
-        let numSamples = Int(sampleRate * duration)
-        var sineWave = [Float](repeating: 0.0, count: numSamples)
-
-        for i in 0..<numSamples {
-            let phase = 2.0 * Float.pi * frequency * Float(i) / sampleRate
-            sineWave[i] = sin(phase)
-        }
-
-        return sineWave
+    public static func generateSineWave(frequency: Float, sampleRate: Float, duration: Float)
+        -> [Float]
+    {
+        return AudioSignalUtility.generateSineWave(
+            frequency: frequency, sampleRate: sampleRate, duration: duration)
     }
 }

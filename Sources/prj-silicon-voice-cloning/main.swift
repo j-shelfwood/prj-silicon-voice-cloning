@@ -62,22 +62,22 @@ func handleCommandLineArguments(
         showHelp()
 
     default:
-        Utilities.log("Unknown command: \(command)")
+        print("Unknown command: \(command)")
         showHelp()
     }
 }
 
 /// Display help information for all available commands
 func showHelp() {
-    Utilities.log("\nUsage:")
-    Utilities.log("  swift run prj-silicon-voice-cloning [command]")
-    Utilities.log("\nAvailable commands:")
-    Utilities.log("  test-audio       Test audio output with a sine wave")
-    Utilities.log("  test-passthrough Test microphone to speaker pass-through")
-    Utilities.log("  test-latency     Measure audio processing latency")
-    Utilities.log("  test-dsp         Test DSP functionality with live audio")
-    Utilities.log("  test-ml          Test ML capabilities")
-    Utilities.log("  help             Show this help message")
+    print("\nUsage:")
+    print("  swift run prj-silicon-voice-cloning [command]")
+    print("\nAvailable commands:")
+    print("  test-audio       Test audio output with a sine wave")
+    print("  test-passthrough Test microphone to speaker pass-through")
+    print("  test-latency     Measure audio processing latency")
+    print("  test-dsp         Test DSP functionality with live audio")
+    print("  test-ml          Test ML capabilities")
+    print("  help             Show this help message")
 }
 
 /// Test audio playback using a sine wave

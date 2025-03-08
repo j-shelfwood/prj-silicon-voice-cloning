@@ -49,7 +49,7 @@ public class MelSpectrogramConverter {
      */
     public func specToMelSpec(spectrogram: [[Float]]) -> [[Float]] {
         guard !spectrogram.isEmpty else {
-            Utilities.log("Error: Empty spectrogram provided to specToMelSpec")
+            print("Error: Empty spectrogram provided to specToMelSpec")
             return []
         }
 
@@ -73,7 +73,7 @@ public class MelSpectrogramConverter {
             let flatFB = flatFilterbank,
             filterBankStrides != nil
         else {
-            Utilities.log("Error: Failed to create mel filterbank")
+            print("Error: Failed to create mel filterbank")
             return []
         }
 
@@ -141,7 +141,7 @@ public class MelSpectrogramConverter {
         -> [[Float]]
     {
         guard !melSpectrogram.isEmpty else {
-            Utilities.log("Error: Empty mel-spectrogram provided to melToLogMel")
+            print("Error: Empty mel-spectrogram provided to melToLogMel")
             return []
         }
 
@@ -258,7 +258,7 @@ public class MelSpectrogramConverter {
 
             // Skip if bins are too close (would create unstable filters)
             if rightBin - leftBin < 2 {
-                Utilities.log(
+                print(
                     "Warning: Mel filter \(i) has too narrow bandwidth. Consider using fewer mel bands."
                 )
                 continue

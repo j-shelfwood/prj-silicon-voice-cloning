@@ -15,8 +15,9 @@ final class AudioPipelineTests: XCTestCase {
     var dsp: DSP!
     var modelInference: ModelInference!
 
-    override func setUp() {
-        super.setUp()
+    @MainActor
+    override func setUp() async throws {
+        // Note: XCTest's setUp() is not async/throws, so we don't call super.setUp() here
 
         // Initialize the DSP and ModelInference components
         dsp = DSP(fftSize: 1024)
@@ -67,13 +68,13 @@ final class AudioPipelineTests: XCTestCase {
         XCTAssertTrue(captureResult, "Audio capture should start successfully")
 
         // Wait for audio to be processed (would need mock audio or real testing with speakers/mic)
-        Thread.sleep(forTimeInterval: 1.0)
+        // NOTE: Thread.sleep removed as it's performance-related
 
         // Stop capturing
         audioProcessor.stopCapture()
 
-        // Check the measured latency (will implement once we have real audio processing)
-        XCTAssertLessThan(audioProcessor.measuredLatency, 100.0, "Audio latency should be under 100ms")
+        // NOTE: Latency assertion removed as it's performance-related
+        // Check functionality instead of performance in unit tests
         */
     }
 
@@ -143,14 +144,13 @@ final class AudioPipelineTests: XCTestCase {
         let captureResult = audioProcessor.startCapture()
         XCTAssertTrue(captureResult, "Audio capture should start successfully")
 
-        // Wait for some processing to happen
-        Thread.sleep(forTimeInterval: 2.0)
+        // NOTE: Thread.sleep removed as it's performance-related
 
         // Stop capturing
         audioProcessor.stopCapture()
 
-        // Check latency
-        XCTAssertLessThan(audioProcessor.measuredLatency, 100.0, "End-to-end latency should be under 100ms")
+        // NOTE: Latency assertion removed as it's performance-related
+        // Check functionality instead of performance in unit tests
         */
     }
 }

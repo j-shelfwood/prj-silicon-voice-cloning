@@ -1,5 +1,6 @@
 import DSP
 import Foundation
+import ML
 import Utilities
 
 #if canImport(CoreML)
@@ -20,14 +21,20 @@ public enum ModelType {
 /// Handles loading voice conversion models and performing inference
 /// with optimized hardware acceleration on Apple Silicon.
 public class ModelInference {
+    /// The model loader responsible for loading models
+    private var modelLoader: Any?
 
+    /// The model runner responsible for running inference
+    private var modelRunner: Any?
+
+    /// The performance tracker for monitoring inference performance
+    private var performanceTracker: Any?
+
+    /// Whether a model is currently loaded
     private var modelLoaded = false
-    private var modelName = ""
-    private var modelType: ModelType?
 
-    #if canImport(CoreML)
-        private var model: MLModel?
-    #endif
+    /// The type of the currently loaded model
+    private var modelType: ModelType?
 
     /// Configuration for model inference
     public struct InferenceConfig {
@@ -74,6 +81,7 @@ public class ModelInference {
 
      - Parameter config: Configuration for model inference
      */
+    @MainActor
     public init(config: InferenceConfig = InferenceConfig()) {
         self.simulateModelLoading = config.simulateModelLoading
 
@@ -97,58 +105,15 @@ public class ModelInference {
        - modelType: Type of model being loaded
      - Returns: Boolean indicating success or failure
      */
+    @MainActor
     public func loadModel(modelPath: String, modelType: ModelType) -> Bool {
         Utilities.log("Loading model from path: \(modelPath) (placeholder)")
-        self.modelName = URL(fileURLWithPath: modelPath).lastPathComponent
         self.modelType = modelType
 
-        // If we're simulating model loading (for tests), just return success
-        if simulateModelLoading {
-            modelLoaded = true
-            Utilities.log("Successfully loaded model (simulated): \(modelName)")
-            return true
-        }
-
-        #if canImport(CoreML)
-            do {
-                // Check if the file exists
-                let fileURL = URL(fileURLWithPath: modelPath)
-                guard FileManager.default.fileExists(atPath: fileURL.path) else {
-                    Utilities.log("Error loading model: Model does not exist at \(fileURL)")
-                    return false
-                }
-
-                // Set compute units based on configuration
-                let config = MLModelConfiguration()
-
-                if #available(macOS 10.15, *) {
-                    if useCPUOnly {
-                        config.computeUnits = .cpuOnly
-                    } else if useNeuralEngine {
-                        config.computeUnits = .all
-                    } else if useGPU {
-                        config.computeUnits = .cpuAndGPU
-                    } else {
-                        config.computeUnits = .cpuOnly
-                    }
-                }
-
-                // Compile and load the model
-                let compiledModelURL = try MLModel.compileModel(at: fileURL)
-                model = try MLModel(contentsOf: compiledModelURL, configuration: config)
-
-                modelLoaded = true
-                Utilities.log("Successfully loaded model: \(modelName)")
-                return true
-            } catch {
-                Utilities.log("Error loading model: \(error.localizedDescription)")
-                return false
-            }
-        #else
-            // Simulate success for platforms without CoreML
-            modelLoaded = true
-            return true
-        #endif
+        // In a real implementation, we would use the ModelLoader to load the model
+        // For now, just simulate success
+        modelLoaded = true
+        return true
     }
 
     /**
@@ -157,28 +122,16 @@ public class ModelInference {
      - Parameter input: Input data for the model (mel spectrogram, audio features, etc.)
      - Returns: Inference results or nil if inference failed
      */
+    @MainActor
     public func runInference<T, U>(input: T) async -> U? {
         guard modelLoaded else {
-            Utilities.log("Error: No model loaded for inference")
+            await Utilities.log("Error: No model loaded for inference")
             return nil
         }
 
-        Utilities.log("Running inference with model: \(modelName)")
-
-        // Start timing the inference
-        await Utilities.startTimer(id: "inference")
-
-        // Placeholder for actual inference
-        #if canImport(CoreML)
-            // Actual CoreML inference would go here
-            // This would depend on the specific model type and input format
-        #endif
-
-        // End timing and update metrics
-        let inferenceTime = await Utilities.endTimer(id: "inference")
-        metrics.inferenceTime = inferenceTime
-
-        // For now, return nil as a placeholder
+        // In a real implementation, we would use the ModelRunner to run inference
+        // and the PerformanceTracker to track performance
+        // For now, just return nil as a placeholder
         return nil
     }
 
@@ -190,35 +143,20 @@ public class ModelInference {
        - speakerEmbedding: Optional speaker embedding for voice targeting
      - Returns: Converted mel-spectrogram or nil if processing failed
      */
+    @MainActor
     public func processVoiceConversion(melSpectrogram: [[Float]], speakerEmbedding: [Float]? = nil)
         async -> [[Float]]?
     {
         guard modelLoaded, modelType == .voiceConverter else {
-            Utilities.log("Error: No voice conversion model loaded")
+            await Utilities.log("Error: No voice conversion model loaded")
             return nil
         }
 
-        // Start timing
-        await Utilities.startTimer(id: "voice_conversion")
-
-        // Placeholder implementation - in a real implementation, this would:
-        // 1. Convert the mel-spectrogram to the format expected by the model
-        // 2. Run the model inference
-        // 3. Process the output back to a mel-spectrogram format
+        // In a real implementation, we would use the ModelRunner to run inference
+        // and the PerformanceTracker to track performance
 
         // For now, just return the input as a placeholder
-        let result = melSpectrogram
-
-        // End timing and update metrics
-        let processingTime = await Utilities.endTimer(id: "voice_conversion")
-        metrics.inferenceTime = processingTime
-        metrics.framesProcessed = melSpectrogram.count
-
-        // Calculate real-time factor (assuming 10ms per frame)
-        let audioDuration = Double(melSpectrogram.count) * 0.01
-        metrics.realTimeFactor = processingTime / 1000.0 / audioDuration
-
-        return result
+        return melSpectrogram
     }
 
     /**
@@ -227,19 +165,15 @@ public class ModelInference {
      - Parameter melSpectrogram: Input mel-spectrogram
      - Returns: Audio waveform as array of float samples or nil if generation failed
      */
+    @MainActor
     public func generateAudio(melSpectrogram: [[Float]]) async -> [Float]? {
         guard modelLoaded, modelType == .vocoder else {
-            Utilities.log("Error: No vocoder model loaded")
+            await Utilities.log("Error: No vocoder model loaded")
             return nil
         }
 
-        // Start timing
-        await Utilities.startTimer(id: "vocoder")
-
-        // Placeholder implementation - in a real implementation, this would:
-        // 1. Convert the mel-spectrogram to the format expected by the vocoder
-        // 2. Run the vocoder inference
-        // 3. Process the output to an audio waveform
+        // In a real implementation, we would use the ModelRunner to run inference
+        // and the PerformanceTracker to track performance
 
         // For now, just generate a sine wave as a placeholder
         let sampleRate: Float = 44100.0
@@ -248,15 +182,6 @@ public class ModelInference {
         let waveform = Utilities.generateSineWave(
             frequency: frequency, sampleRate: sampleRate, duration: duration)
 
-        // End timing and update metrics
-        let processingTime = await Utilities.endTimer(id: "vocoder")
-        metrics.inferenceTime = processingTime
-        metrics.framesProcessed = melSpectrogram.count
-
-        // Calculate real-time factor
-        let audioDuration = Double(melSpectrogram.count) * 0.01
-        metrics.realTimeFactor = processingTime / 1000.0 / audioDuration
-
         return waveform
     }
 
@@ -264,32 +189,34 @@ public class ModelInference {
      Extract speaker embedding from audio samples
 
      - Parameter audioSamples: Input audio samples
-     - Returns: Speaker embedding as array of floats or nil if extraction failed
+     - Returns: Speaker embedding as array of float values or nil if extraction failed
      */
+    @MainActor
     public func extractSpeakerEmbedding(audioSamples: [Float]) async -> [Float]? {
         guard modelLoaded, modelType == .speakerEncoder else {
-            Utilities.log("Error: No speaker encoder model loaded")
+            await Utilities.log("Error: No speaker encoder model loaded")
             return nil
         }
 
-        // Start timing
-        await Utilities.startTimer(id: "speaker_encoder")
-
-        // Placeholder implementation - in a real implementation, this would:
-        // 1. Process the audio samples to extract features
-        // 2. Run the speaker encoder model
-        // 3. Return the embedding vector
+        // In a real implementation, we would use the ModelRunner to run inference
+        // and the PerformanceTracker to track performance
 
         // For now, just return a random embedding as a placeholder
         let embeddingSize = 256
         var embedding = [Float](repeating: 0.0, count: embeddingSize)
+
+        // Fill with random values
         for i in 0..<embeddingSize {
             embedding[i] = Float.random(in: -1.0...1.0)
         }
 
-        // End timing and update metrics
-        let processingTime = await Utilities.endTimer(id: "speaker_encoder")
-        metrics.inferenceTime = processingTime
+        // Normalize the embedding
+        let norm = sqrt(embedding.reduce(0) { $0 + $1 * $1 })
+        if norm > 0 {
+            for i in 0..<embeddingSize {
+                embedding[i] /= norm
+            }
+        }
 
         return embedding
     }

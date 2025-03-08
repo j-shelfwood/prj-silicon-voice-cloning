@@ -24,7 +24,8 @@ public class FFTProcessor {
         let log2n = vDSP_Length(log2(Double(fftSize)))
         self.fftSetup = vDSP.FFT(log2n: log2n, radix: .radix2, ofType: DSPSplitComplex.self)
 
-        Utilities.log("FFTProcessor initialized with FFT size: \(fftSize)")
+        // Use print instead of Utilities.log to avoid MainActor requirement
+        print("FFTProcessor initialized with FFT size: \(fftSize)")
     }
 
     /**
@@ -36,7 +37,8 @@ public class FFTProcessor {
     public func performFFT(inputBuffer: [Float]) -> [Float] {
         // Ensure input buffer is large enough
         guard inputBuffer.count >= fftSize else {
-            Utilities.log(
+            // Use print instead of Utilities.log to avoid MainActor requirement
+            print(
                 "Error: Input buffer too small for FFT. Expected at least \(fftSize) samples, got \(inputBuffer.count)."
             )
             return []
@@ -70,7 +72,8 @@ public class FFTProcessor {
 
                 // Perform forward FFT
                 guard let fftSetup = fftSetup else {
-                    Utilities.log("Error: FFT setup not initialized")
+                    // Use print instead of Utilities.log to avoid MainActor requirement
+                    print("Error: FFT setup not initialized")
                     return []
                 }
 
