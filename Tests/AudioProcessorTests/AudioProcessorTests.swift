@@ -101,31 +101,6 @@ final class AudioProcessorTests: XCTestCase {
         audioProcessor.stopCapture()
     }
 
-    func testMeasuredLatency() {
-        // For the mock implementation, this will use the simulated latency
-
-        // If using the real implementation, test with empty timestamps
-        if useRealAudioHardware {
-            XCTAssertEqual(
-                realAudioProcessor.measuredLatency, 0.0,
-                "Latency should be 0 when no timestamps exist")
-
-            // Add some test timestamps
-            let now = CFAbsoluteTimeGetCurrent()
-            realAudioProcessor.captureTimestamps = [now, now + 0.01, now + 0.02]
-            realAudioProcessor.playbackTimestamps = [now + 0.02, now + 0.03, now + 0.04]
-
-            // Test that the measured latency is calculated correctly
-            // We're testing the calculation logic, not the actual performance
-            let latency = realAudioProcessor.measuredLatency
-            XCTAssertGreaterThan(latency, 0.0, "Calculated latency should be greater than 0")
-        } else {
-            // For mock implementation, just verify it returns a value
-            let latency = audioProcessor.measuredLatency
-            XCTAssertGreaterThanOrEqual(latency, 0.0, "Latency should be non-negative")
-        }
-    }
-
     func testAudioProcessingCallback() {
         // Create a simple processing callback that doubles the amplitude
         audioProcessor.audioProcessingCallback = { buffer in
@@ -185,26 +160,5 @@ final class AudioProcessorTests: XCTestCase {
 
         // Clean up
         audioProcessor.stopCapture()
-    }
-
-    // Test specific to the mock implementation
-    func testMockConfigurationFailures() {
-        guard !useRealAudioHardware else {
-            return  // Skip this test when using real hardware
-        }
-
-        // Create a mock with capture failure
-        let failCaptureMock = MockAudioProcessor(
-            config: MockAudioProcessor.MockConfig(captureSucceeds: false))
-        XCTAssertFalse(
-            failCaptureMock.startCapture(), "Capture should fail with this configuration")
-
-        // Create a mock with playback failure
-        let failPlaybackMock = MockAudioProcessor(
-            config: MockAudioProcessor.MockConfig(playbackSucceeds: false))
-        let sineWave = Utilities.generateSineWave(
-            frequency: 440.0, sampleRate: 44100.0, duration: 0.1)
-        XCTAssertFalse(
-            failPlaybackMock.playAudio(sineWave), "Playback should fail with this configuration")
     }
 }

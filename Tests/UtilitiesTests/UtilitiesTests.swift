@@ -33,8 +33,8 @@ final class UtilitiesTests: XCTestCase {
         // Test that the timer functions correctly
         Utilities.startTimer(id: "test")
 
-        // Perform a minimal operation
-        let _ = 1 + 1
+        // Perform a minimal operation that takes some time
+        let _ = (0..<10000).reduce(0, +)
 
         let elapsed = Utilities.endTimer(id: "test")
 
@@ -45,7 +45,14 @@ final class UtilitiesTests: XCTestCase {
         Utilities.startTimer(id: "timer1")
         Utilities.startTimer(id: "timer2")
 
+        // Add a small delay to ensure timers measure something
+        let _ = (0..<10000).reduce(0, +)
+
         let elapsed1 = Utilities.endTimer(id: "timer1")
+
+        // Add another small delay for timer2
+        let _ = (0..<10000).reduce(0, +)
+
         let elapsed2 = Utilities.endTimer(id: "timer2")
 
         XCTAssertGreaterThan(elapsed1, 0.0, "Timer 1 should return a positive elapsed time")
