@@ -183,7 +183,7 @@ struct BenchmarkConfig {
     static let standard = BenchmarkConfig(
         iterations: 10,
         warmupIterations: 3,
-        audioFilePath: "Assets/iroh-short.m4a",
+        audioFilePath: "Assets/target-clone-voice-sample.m4a",
         audioLength: 5.0,
         fftSize: 1024,
         hopSize: 256,

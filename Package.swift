@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 5.5
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,7 +6,7 @@ import PackageDescription
 let package = Package(
     name: "prj-silicon-voice-cloning",
     platforms: [
-        .macOS(.v13)
+        .macOS(.v12)
     ],
     products: [
         .executable(
@@ -51,10 +51,6 @@ let package = Package(
             dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
         ),
         .executableTarget(
-            name: "prj-silicon-voice-cloning",
-            dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
-        ),
-        .executableTarget(
             name: "Benchmarks",
             dependencies: ["Audio", "AudioProcessor", "DSP", "ML", "ModelInference", "Utilities"]
         ),
@@ -68,11 +64,11 @@ let package = Package(
         ),
         .target(
             name: "DSP",
-            dependencies: ["Utilities"]
+            dependencies: ["Utilities", "AudioProcessor"]
         ),
         .target(
             name: "ML",
-            dependencies: ["Utilities"]
+            dependencies: ["Utilities", "DSP"]
         ),
         .target(
             name: "ModelInference",
@@ -110,5 +106,6 @@ let package = Package(
                 "ModelInference", "Utilities",
             ]
         ),
-    ]
+    ],
+    swiftLanguageVersions: [.v5]
 )
